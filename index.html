@@ -1665,7 +1665,7 @@ async function loadFromDataJson(){
 
     if(p.records.length){
       lockUpload(p.savedAt||'');
-      showStatus('☁️ data.json chargé depuis GitHub — '+fInt(p.records.length)+' lignes');
+      showStatus('☁️ Data chargé depuis serveur — '+fInt(p.records.length)+' lignes');
     }
     return true;
   }catch(e){
