@@ -484,7 +484,7 @@
       .sb-overlay{top:70px}
     }
 
-    /* ── GITHUB SAVE MODAL ── */
+    /* ── Server SAVE MODAL ── */
     .gh-box{width:min(520px,calc(100vw - 28px));background:var(--panel,#fff);border:1px solid var(--line,#d7dce3);border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,.35);padding:22px;color:var(--text,#18202a)}
     .gh-ttl{font-size:20px;font-weight:900;margin-bottom:6px}.gh-sub{font-size:13px;line-height:1.5;opacity:.78;margin-bottom:16px}
     .gh-field{display:flex;flex-direction:column;gap:6px;margin:10px 0}.gh-field label{font-size:12px;font-weight:800}.gh-field input{height:42px;border:1px solid var(--line,#d7dce3);border-radius:9px;padding:0 11px;font-size:14px;background:var(--bg,#fff);color:var(--text,#18202a);box-sizing:border-box}
@@ -521,14 +521,14 @@
   </div>
 </div>
 
-<!-- GITHUB SAVE MODAL -->
-<div class="modal-bg" id="githubModal">
+<!-- Server SAVE MODAL -->
+<div class="modal-bg" id="ServerModal">
   <div class="gh-box">
-    <div class="gh-ttl">☁️ Enregistrer dans GitHub</div>
-    <div class="gh-sub">Le fichier <b>data.json</b> sera remplacé dans <b>aminejab1984/CMDASH.github.io</b> sur la branche <b>main</b>.</div>
+    <div class="gh-ttl">☁️ Enregistrer dans Serveur</div>
+    <div class="gh-sub">Le fichier <b>data.json</b> sera remplacé dans <b>aminejab1984/CMDASH.Server.io</b> sur la branche <b>main</b>.</div>
     <div class="gh-field">
-      <label for="ghTokenInp">Token GitHub (Fine-grained)</label>
-      <input id="ghTokenInp" type="password" autocomplete="off" placeholder="github_pat_…"/>
+      <label for="ghTokenInp">Token Server (Fine-grained)</label>
+      <input id="ghTokenInp" type="password" autocomplete="off" placeholder="Server_pat_…"/>
     </div>
     <div class="gh-field">
       <label for="ghMessageInp">Message du commit</label>
@@ -574,7 +574,7 @@
       <div class="admin-actions" id="adminActions">
         <button class="btn-export2" id="exportBtn" title="Télécharger les données">⬇ Download</button>
         <button class="btn-import" id="importBtn" title="Importer un fichier">📂 Upload</button>
-        <button class="gh-save-mini" id="githubSaveBtn" title="Enregistrer data.json dans GitHub">☁️ GitHub</button>
+        <button class="gh-save-mini" id="ServerSaveBtn" title="Enregistrer data.json dans Server">☁️ Server</button>
         <button class="btn-reset-data" id="resetDataBtn" title="Réinitialiser les données">🗑 Reset</button>
         <button class="btn-unlock" id="unlockBtn" title="Déverrouiller l'import">🔄 Déverrouiller</button>
       </div>
@@ -1507,9 +1507,9 @@ async function applyMapping(){
   showStatus(`✅ ${fInt(newR.length)} lignes chargées — CRBT depuis "${crbtColumnName}" : ${fCur(importedCRBT)} — "${newMeta.sourceFile}"`);
   const savedAt=new Date().toLocaleString('fr-FR');
   lockUpload(savedAt);
-  // Sauvegarde GitHub automatique après l'association des colonnes.
+  // Sauvegarde Server automatique après l'association des colonnes.
   // Si un token existe déjà dans la session, aucun écran supplémentaire n'est affiché.
-  setTimeout(()=>saveCurrentDataToGitHub({askToken:true}),120);
+  setTimeout(()=>saveCurrentDataToServer({askToken:true}),120);
 }
 
 function lockUpload(savedAt){
@@ -1583,24 +1583,24 @@ document.getElementById('unlockBtn').addEventListener('click', unlockImport);
   };
 })();
 
-/* ════════════ GITHUB PAGES — LECTURE + SAUVEGARDE data.json ════════════
+/* ════════════ Server PAGES — LECTURE + SAUVEGARDE data.json ════════════
    - Le dashboard LIT data.json au démarrage.
-   - Après un Upload + association des colonnes, il peut remplacer data.json via l'API GitHub.
+   - Après un Upload + association des colonnes, il peut remplacer data.json via l'API Server.
    - Le token est demandé dans le navigateur et conservé uniquement dans sessionStorage.
    - Aucun token n'est intégré au HTML.
 */
 const DATA_JSON_URL='./data.json';
 const GH_OWNER='aminejab1984';
-const GH_REPO='CMDASH.github.io';
+const GH_REPO='CMDASH.Server.io';
 const GH_BRANCH='main';
 const GH_PATH='data.json';
-const GH_API_BASE='https://api.github.com';
+const GH_API_BASE='https://api.Server.com';
 
-function getGithubToken(){
-  try{return sessionStorage.getItem('gpl_github_token')||'';}catch(_){return '';}
+function getServerToken(){
+  try{return sessionStorage.getItem('gpl_Server_token')||'';}catch(_){return '';}
 }
-function setGithubToken(token){
-  try{ if(token) sessionStorage.setItem('gpl_github_token',token); else sessionStorage.removeItem('gpl_github_token'); }catch(_){}
+function setServerToken(token){
+  try{ if(token) sessionStorage.setItem('gpl_Server_token',token); else sessionStorage.removeItem('gpl_Server_token'); }catch(_){}
 }
 function utf8ToBase64(str){
   const bytes=new TextEncoder().encode(str);
@@ -1612,36 +1612,36 @@ function utf8ToBase64(str){
   return btoa(out);
 }
 
-function openGithubModal(){
-  const modal=document.getElementById('githubModal');
+function openServerModal(){
+  const modal=document.getElementById('ServerModal');
   const token=document.getElementById('ghTokenInp');
   const err=document.getElementById('ghErr');
   if(!modal)return;
-  if(token) token.value=getGithubToken();
+  if(token) token.value=getServerToken();
   if(err) err.textContent='';
   modal.classList.add('show');
   setTimeout(()=>{if(token)token.focus();},80);
 }
-function closeGithubModal(){document.getElementById('githubModal')?.classList.remove('show');}
+function closeServerModal(){document.getElementById('ServerModal')?.classList.remove('show');}
 
-document.getElementById('githubSaveBtn')?.addEventListener('click',()=>saveCurrentDataToGitHub({askToken:true,forcePrompt:true}));
-document.getElementById('ghCancel')?.addEventListener('click',closeGithubModal);
+document.getElementById('ServerSaveBtn')?.addEventListener('click',()=>saveCurrentDataToServer({askToken:true,forcePrompt:true}));
+document.getElementById('ghCancel')?.addEventListener('click',closeServerModal);
 document.getElementById('ghTokenInp')?.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('ghOk')?.click();});
 document.getElementById('ghOk')?.addEventListener('click',async()=>{
   const token=(document.getElementById('ghTokenInp')?.value||'').trim();
-  if(!token){document.getElementById('ghErr').textContent='Veuillez saisir votre token GitHub.';return;}
-  setGithubToken(token);
+  if(!token){document.getElementById('ghErr').textContent='Veuillez saisir votre token Server.';return;}
+  setServerToken(token);
   const msg=(document.getElementById('ghMessageInp')?.value||'Update data.json depuis le dashboard').trim()||'Update data.json depuis le dashboard';
-  closeGithubModal();
-  await saveCurrentDataToGitHub({askToken:false,commitMessage:msg});
+  closeServerModal();
+  await saveCurrentDataToServer({askToken:false,commitMessage:msg});
 });
 
-async function saveCurrentDataToGitHub({askToken=true,forcePrompt=false,commitMessage='Update data.json depuis le dashboard'}={}){
-  if(!records.length){showStatus('⚠️ Aucune donnée à enregistrer dans GitHub.',true);return false;}
-  let token=getGithubToken();
+async function saveCurrentDataToServer({askToken=true,forcePrompt=false,commitMessage='Update data.json depuis le dashboard'}={}){
+  if(!records.length){showStatus('⚠️ Aucune donnée à enregistrer dans Server.',true);return false;}
+  let token=getServerToken();
   if(forcePrompt || !token){
-    if(askToken){openGithubModal();return false;}
-    showStatus('❌ Token GitHub manquant.',true);return false;
+    if(askToken){openServerModal();return false;}
+    showStatus('❌ Token Server manquant.',true);return false;
   }
 
   const payload={meta:{...meta},records:[...records],savedAt:new Date().toLocaleString('fr-FR')};
@@ -1649,18 +1649,18 @@ async function saveCurrentDataToGitHub({askToken=true,forcePrompt=false,commitMe
   const sizeMB=(new TextEncoder().encode(json).length/1048576);
   if(sizeMB>90){showStatus('❌ data.json est trop volumineux ('+sizeMB.toFixed(1)+' Mo).',true);return false;}
 
-  showStatus('☁️ Enregistrement de '+fInt(records.length)+' lignes dans GitHub…');
+  showStatus('☁️ Enregistrement de '+fInt(records.length)+' lignes dans Server…');
   try{
     const headers={
-      'Accept':'application/vnd.github+json',
+      'Accept':'application/vnd.Server+json',
       'Authorization':'Bearer '+token,
-      'X-GitHub-Api-Version':'2026-03-10',
+      'X-Server-Api-Version':'2026-03-10',
       'Content-Type':'application/json'
     };
     const url=`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_PATH}`;
     const getRes=await fetch(url+'?ref='+encodeURIComponent(GH_BRANCH),{headers});
     if(!getRes.ok){
-      if(getRes.status===401||getRes.status===403){setGithubToken('');showStatus('❌ Token GitHub refusé ou permissions insuffisantes.',true);openGithubModal();return false;}
+      if(getRes.status===401||getRes.status===403){setServerToken('');showStatus('❌ Token Server refusé ou permissions insuffisantes.',true);openServerModal();return false;}
       throw new Error('Lecture data.json: HTTP '+getRes.status);
     }
     const current=await getRes.json();
@@ -1675,15 +1675,15 @@ async function saveCurrentDataToGitHub({askToken=true,forcePrompt=false,commitMe
     const putRes=await fetch(url,{method:'PUT',headers,body:JSON.stringify(body)});
     const putData=await putRes.json().catch(()=>({}));
     if(!putRes.ok){
-      if(putRes.status===401||putRes.status===403){setGithubToken('');showStatus('❌ GitHub a refusé l’écriture. Vérifiez Contents: Read and write.',true);openGithubModal();return false;}
-      if(putRes.status===409){showStatus('❌ Conflit GitHub : data.json a changé. Réessayez.',true);return false;}
+      if(putRes.status===401||putRes.status===403){setServerToken('');showStatus('❌ Server a refusé l’écriture. Vérifiez Contents: Read and write.',true);openServerModal();return false;}
+      if(putRes.status===409){showStatus('❌ Conflit Server : data.json a changé. Réessayez.',true);return false;}
       throw new Error(putData.message||('HTTP '+putRes.status));
     }
-    showStatus('☁️✅ data.json enregistré dans GitHub — '+fInt(records.length)+' lignes');
+    showStatus('☁️✅ data.json enregistré dans Server — '+fInt(records.length)+' lignes');
     return true;
   }catch(err){
     console.error(err);
-    showStatus('❌ Sauvegarde GitHub impossible : '+(err?.message||err),true);
+    showStatus('❌ Sauvegarde Server impossible : '+(err?.message||err),true);
     return false;
   }
 }
@@ -1705,7 +1705,7 @@ async function loadFromDataJson(){
 
     if(p.records.length){
       lockUpload(p.savedAt||'');
-      showStatus('☁️ data.json chargé depuis GitHub — '+fInt(p.records.length)+' lignes');
+      showStatus('☁️ data.json chargé depuis Server — '+fInt(p.records.length)+' lignes');
     }
     return true;
   }catch(e){
