@@ -1638,7 +1638,7 @@ async function saveCurrentDataToGitHub({commitMessage='Update data.json depuis l
       if(putRes.status===409) throw new Error('Conflit : data.json a changé entre la lecture et la sauvegarde.');
       throw new Error(putData.message||('HTTP '+putRes.status));
     }
-    showStatus('☁️✅ data.json enregistré automatiquement dans GitHub — '+fInt(records.length)+' lignes');
+    showStatus('☁️✅ Enregistré automatiquement dans serveur — '+fInt(records.length)+' lignes');
     return true;
   }catch(err){
     console.error(err);
