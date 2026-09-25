@@ -484,7 +484,7 @@
       .sb-overlay{top:70px}
     }
 
-    /* ── Server SAVE MODAL ── */
+    /* ── GitHub SAVE MODAL ── */
     .gh-box{width:min(520px,calc(100vw - 28px));background:var(--panel,#fff);border:1px solid var(--line,#d7dce3);border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,.35);padding:22px;color:var(--text,#18202a)}
     .gh-ttl{font-size:20px;font-weight:900;margin-bottom:6px}.gh-sub{font-size:13px;line-height:1.5;opacity:.78;margin-bottom:16px}
     .gh-field{display:flex;flex-direction:column;gap:6px;margin:10px 0}.gh-field label{font-size:12px;font-weight:800}.gh-field input{height:42px;border:1px solid var(--line,#d7dce3);border-radius:9px;padding:0 11px;font-size:14px;background:var(--bg,#fff);color:var(--text,#18202a);box-sizing:border-box}
@@ -521,28 +521,6 @@
   </div>
 </div>
 
-<!-- Server SAVE MODAL -->
-<div class="modal-bg" id="ServerModal">
-  <div class="gh-box">
-    <div class="gh-ttl">☁️ Enregistrer dans GitHub</div>
-    <div class="gh-sub">Le fichier <b>data.json</b> sera remplacé dans le dépôt <b>CM</b> sur la branche <b>main</b>.</div>
-    <div class="gh-field">
-      <label for="ghTokenInp">Token GitHub (Fine-grained)</label>
-      <input id="ghTokenInp" type="password" autocomplete="off" placeholder="github_pat_…"/>
-    </div>
-    <div class="gh-field">
-      <label for="ghMessageInp">Message du commit</label>
-      <input id="ghMessageInp" type="text" value="Update data.json depuis le dashboard"/>
-    </div>
-    <div class="gh-err" id="ghErr"></div>
-    <div class="gh-note">Le token n'est pas écrit dans le fichier HTML. Il reste uniquement dans la session du navigateur. Utilisez un token GitHub Fine-grained limité au dépôt <b>cmdashcod/CM</b> avec <b>Contents: Read and write</b>.</div>
-    <div class="gh-btns">
-      <button class="gh-cancel" id="ghCancel">Annuler</button>
-      <button class="gh-ok" id="ghOk">💾 Enregistrer</button>
-    </div>
-  </div>
-</div>
-
 <!-- HEADER -->
 <header class="hdr">
   <!-- GAUCHE : hamburger + logo + titre -->
@@ -574,7 +552,6 @@
       <div class="admin-actions" id="adminActions">
         <button class="btn-export2" id="exportBtn" title="Télécharger les données">⬇ Download</button>
         <button class="btn-import" id="importBtn" title="Importer un fichier">📂 Upload</button>
-        <button class="gh-save-mini" id="ServerSaveBtn" title="Enregistrer data.json dans Server">☁️ Server</button>
         <button class="btn-reset-data" id="resetDataBtn" title="Réinitialiser les données">🗑 Reset</button>
         <button class="btn-unlock" id="unlockBtn" title="Déverrouiller l'import">🔄 Déverrouiller</button>
       </div>
@@ -1507,9 +1484,9 @@ async function applyMapping(){
   showStatus(`✅ ${fInt(newR.length)} lignes chargées — CRBT depuis "${crbtColumnName}" : ${fCur(importedCRBT)} — "${newMeta.sourceFile}"`);
   const savedAt=new Date().toLocaleString('fr-FR');
   lockUpload(savedAt);
-  // Sauvegarde Server automatique après l'association des colonnes.
+  // Sauvegarde GitHub automatique après l'association des colonnes.
   // Si un token existe déjà dans la session, aucun écran supplémentaire n'est affiché.
-  setTimeout(()=>saveCurrentDataToServer({askToken:true}),120);
+  setTimeout(()=>saveCurrentDataToGitHub(),120);
 }
 
 function lockUpload(savedAt){
@@ -1583,11 +1560,10 @@ document.getElementById('unlockBtn').addEventListener('click', unlockImport);
   };
 })();
 
-/* ════════════ GitHub — LECTURE + SAUVEGARDE data.json ════════════
+/* ════════════ GITHUB PAGES — LECTURE + SAUVEGARDE AUTOMATIQUE data.json ════════════
    - Le dashboard LIT data.json au démarrage.
-   - Après un Upload + association des colonnes, il peut remplacer data.json via l'API GitHub.
-   - Le token est demandé dans le navigateur et conservé uniquement dans sessionStorage.
-   - Aucun token n'est intégré au HTML.
+   - Après Upload + association des colonnes, data.json est sauvegardé automatiquement.
+   - Aucun écran d'authentification n'est affiché.
 */
 const DATA_JSON_URL='./data.json';
 const GH_OWNER='cmdashcod';
@@ -1596,12 +1572,13 @@ const GH_BRANCH='main';
 const GH_PATH='data.json';
 const GH_API_BASE='https://api.github.com';
 
-function getServerToken(){
-  try{return sessionStorage.getItem('gpl_github_token')||'';}catch(_){return '';}
-}
-function setServerToken(token){
-  try{ if(token) sessionStorage.setItem('gpl_github_token',token); else sessionStorage.removeItem('gpl_github_token'); }catch(_){}
-}
+// Authentification automatique demandée pour ce dashboard.
+// IMPORTANT : un token placé dans un HTML public est visible par toute personne
+// pouvant consulter le code source. Il doit être limité au dépôt CM.
+const GH_AUTO_TOKEN='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';
+
+function getGitHubToken(){ return GH_AUTO_TOKEN; }
+function setGitHubToken(_token){}
 function utf8ToBase64(str){
   const bytes=new TextEncoder().encode(str);
   let out='';
@@ -1612,78 +1589,61 @@ function utf8ToBase64(str){
   return btoa(out);
 }
 
-function openServerModal(){
-  const modal=document.getElementById('ServerModal');
-  const token=document.getElementById('ghTokenInp');
-  const err=document.getElementById('ghErr');
-  if(!modal)return;
-  if(token) token.value=getServerToken();
-  if(err) err.textContent='';
-  modal.classList.add('show');
-  setTimeout(()=>{if(token)token.focus();},80);
-}
-function closeServerModal(){document.getElementById('ServerModal')?.classList.remove('show');}
+// Sauvegarde manuelle éventuelle : elle ne demande plus aucune authentification.
+document.getElementById('GitHubSaveBtn')?.addEventListener('click',()=>saveCurrentDataToGitHub());
 
-document.getElementById('ServerSaveBtn')?.addEventListener('click',()=>saveCurrentDataToServer({askToken:true,forcePrompt:true}));
-document.getElementById('ghCancel')?.addEventListener('click',closeServerModal);
-document.getElementById('ghTokenInp')?.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('ghOk')?.click();});
-document.getElementById('ghOk')?.addEventListener('click',async()=>{
-  const token=(document.getElementById('ghTokenInp')?.value||'').trim();
-  if(!token){document.getElementById('ghErr').textContent='Veuillez saisir votre token GitHub.';return;}
-  setServerToken(token);
-  const msg=(document.getElementById('ghMessageInp')?.value||'Update data.json depuis le dashboard').trim()||'Update data.json depuis le dashboard';
-  closeServerModal();
-  await saveCurrentDataToServer({askToken:false,commitMessage:msg});
-});
-
-async function saveCurrentDataToServer({askToken=true,forcePrompt=false,commitMessage='Update data.json depuis le dashboard'}={}){
+async function saveCurrentDataToGitHub({commitMessage='Update data.json depuis le dashboard'}={}){
   if(!records.length){showStatus('⚠️ Aucune donnée à enregistrer dans GitHub.',true);return false;}
-  let token=getServerToken();
-  if(forcePrompt || !token){
-    if(askToken){openServerModal();return false;}
-    showStatus('❌ Token GitHub manquant.',true);return false;
-  }
+  const token=getGitHubToken();
 
   const payload={meta:{...meta},records:[...records],savedAt:new Date().toLocaleString('fr-FR')};
   const json=JSON.stringify(payload);
   const sizeMB=(new TextEncoder().encode(json).length/1048576);
   if(sizeMB>90){showStatus('❌ data.json est trop volumineux ('+sizeMB.toFixed(1)+' Mo).',true);return false;}
 
-  showStatus('☁️ Enregistrement de '+fInt(records.length)+' lignes dans GitHub…');
+  showStatus('☁️ Enregistrement automatique de '+fInt(records.length)+' lignes dans GitHub…');
   try{
-    const headers={
-      'Accept':'application/vnd.github+json',
-      'Authorization':'Bearer '+token,
-      'X-GitHub-Api-Version':'2022-11-28',
-      'Content-Type':'application/json'
-    };
     const url=`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_PATH}`;
-    const getRes=await fetch(url+'?ref='+encodeURIComponent(GH_BRANCH),{headers});
+    const getHeaders={
+      'Accept':'application/vnd.github+json',
+      'X-GitHub-Api-Version':'2026-03-10'
+    };
+    const getRes=await fetch(url+'?ref='+encodeURIComponent(GH_BRANCH)+'&_='+Date.now(),{
+      method:'GET',mode:'cors',cache:'no-store',headers:getHeaders
+    });
     if(!getRes.ok){
-      if(getRes.status===401||getRes.status===403){setServerToken('');showStatus('❌ Token GitHub refusé ou permissions insuffisantes.',true);openServerModal();return false;}
-      throw new Error('Lecture data.json: HTTP '+getRes.status);
+      if(getRes.status===404) throw new Error('data.json introuvable dans cmdashcod/CM sur la branche main.');
+      throw new Error('Lecture data.json : HTTP '+getRes.status);
     }
     const current=await getRes.json();
     if(!current.sha)throw new Error('SHA de data.json introuvable.');
 
+    const putHeaders={
+      'Accept':'application/vnd.github+json',
+      'Authorization':'Bearer '+token,
+      'X-GitHub-Api-Version':'2026-03-10',
+      'Content-Type':'application/json'
+    };
     const body={
       message:commitMessage,
       content:utf8ToBase64(json),
       sha:current.sha,
       branch:GH_BRANCH
     };
-    const putRes=await fetch(url,{method:'PUT',headers,body:JSON.stringify(body)});
+    const putRes=await fetch(url,{method:'PUT',mode:'cors',headers:putHeaders,body:JSON.stringify(body)});
     const putData=await putRes.json().catch(()=>({}));
     if(!putRes.ok){
-      if(putRes.status===401||putRes.status===403){setServerToken('');showStatus('❌ GitHub a refusé l’écriture. Vérifiez Contents: Read and write.',true);openServerModal();return false;}
-      if(putRes.status===409){showStatus('❌ Conflit GitHub : data.json a changé. Réessayez.',true);return false;}
+      if(putRes.status===401) throw new Error('Token GitHub invalide ou expiré.');
+      if(putRes.status===403) throw new Error('GitHub refuse l’écriture. Le token doit avoir Contents → Read and write sur le dépôt CM.');
+      if(putRes.status===409) throw new Error('Conflit : data.json a changé entre la lecture et la sauvegarde.');
       throw new Error(putData.message||('HTTP '+putRes.status));
     }
-    showStatus('☁️✅ data.json enregistré dans GitHub — '+fInt(records.length)+' lignes');
+    showStatus('☁️✅ data.json enregistré automatiquement dans GitHub — '+fInt(records.length)+' lignes');
     return true;
   }catch(err){
     console.error(err);
-    showStatus('❌ Sauvegarde GitHub impossible : '+(err?.message||err),true);
+    const msg=(err?.message||String(err));
+    showStatus('❌ Sauvegarde GitHub impossible : '+msg,true);
     return false;
   }
 }
