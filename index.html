@@ -1510,7 +1510,7 @@ document.getElementById('unlockBtn').addEventListener('click', unlockImport);
 
 /* ════════════ GITHUB — DATA SPLIT LARGE VOLUME ════════════
    - Supporte de très gros volumes (jusqu'à plusieurs centaines de milliers de lignes).
-   - Découpe automatiquement les données en fichiers JSON d'environ 900 Ko.
+   - Découpe automatiquement les données en fichiers JSON de 30 000 lignes maximum pour accélérer le chargement.
    - Sauvegarde les morceaux via Git Blobs + Tree + un seul commit.
    - Le dashboard recharge data_manifest.json puis tous les morceaux.
    - Le token est demandé uniquement au moment de la première sauvegarde après association.
@@ -1521,7 +1521,7 @@ const GH_BRANCH='main';
 const GH_API_BASE='https://api.github.com';
 const GH_MANIFEST_PATH='data_manifest.json';
 const GH_PART_PREFIX='data';
-const GH_PART_TARGET_BYTES=900*1024;
+const GH_PART_MAX_ROWS=30000;
 const GH_TOKEN_KEY='cmdash_github_token';
 
 function getGitHubToken(){ return (localStorage.getItem(GH_TOKEN_KEY)||'').trim(); }
@@ -1568,16 +1568,15 @@ async function requestGitHubToken(){
 }
 function makeParts(payload){
   const records=payload.records||[];
-  const parts=[]; let current=[]; let currentBytes=0;
-  for(const row of records){
-    const rowText=JSON.stringify(row); const rowBytes=new TextEncoder().encode(rowText).length+2;
-    if(current.length && currentBytes+rowBytes>GH_PART_TARGET_BYTES){ parts.push(current); current=[]; currentBytes=0; }
-    current.push(row); currentBytes+=rowBytes;
+  const parts=[];
+  for(let i=0;i<records.length;i+=GH_PART_MAX_ROWS){
+    parts.push(records.slice(i,i+GH_PART_MAX_ROWS));
   }
-  if(current.length || !parts.length) parts.push(current);
+  if(!parts.length) parts.push([]);
   const total=parts.length;
   return parts.map((rows,i)=>({
-    meta:i===0?payload.meta:{}, savedAt:payload.savedAt, part:i+1, parts:total, records:rows
+    meta:i===0?payload.meta:{}, savedAt:payload.savedAt, part:i+1, parts:total,
+    fromRow:i*GH_PART_MAX_ROWS+1, toRow:i*GH_PART_MAX_ROWS+rows.length, records:rows
   }));
 }
 async function getHeadTree(token){
@@ -1617,7 +1616,7 @@ async function saveCurrentDataToGitHub(){
       entries.push({path:names[i],mode:'100644',type:'blob',sha:blob.sha});
     }
     if(old?.files){ for(const oldName of old.files){ if(!names.includes(oldName)) entries.push({path:oldName,mode:'100644',type:'blob',sha:null}); } }
-    const manifest={version:2,parts:parts.length,files:names,rowCount:records.length,savedAt:payload.savedAt,partTargetBytes:GH_PART_TARGET_BYTES};
+    const manifest={version:2,parts:parts.length,files:names,rowCount:records.length,savedAt:payload.savedAt,rowsPerFile:GH_PART_MAX_ROWS};
     const mb=await createBlob(token,JSON.stringify(manifest));
     entries.push({path:GH_MANIFEST_PATH,mode:'100644',type:'blob',sha:mb.sha});
     showStatus('☁️ Création du commit GitHub…');
@@ -1640,11 +1639,18 @@ async function loadFromDataJson(){
     const mr=await fetch('./'+GH_MANIFEST_PATH+'?ts='+Date.now(),{cache:'no-store'});
     if(mr.ok) manifest=await mr.json();
     const files=manifest?.files?.length?manifest.files:['data.json'];
+    const responses=await Promise.all(files.map(async file=>{
+      const r=await fetch('./'+file+'?ts='+Date.now(),{cache:'no-store'});
+      if(!r.ok) throw new Error(file+' HTTP '+r.status);
+      const p=await r.json();
+      if(!Array.isArray(p.records)) throw new Error(file+' invalide');
+      return p;
+    }));
     const all=[]; let firstMeta={}; let savedAt='';
-    for(const file of files){
-      const r=await fetch('./'+file+'?ts='+Date.now(),{cache:'no-store'}); if(!r.ok) throw new Error(file+' HTTP '+r.status);
-      const p=await r.json(); if(!Array.isArray(p.records)) throw new Error(file+' invalide');
-      all.push(...p.records); if(p.meta&&Object.keys(p.meta).length) firstMeta=p.meta; savedAt=p.savedAt||savedAt;
+    for(const p of responses){
+      all.push(...p.records);
+      if(p.meta&&Object.keys(p.meta).length) firstMeta=p.meta;
+      savedAt=p.savedAt||savedAt;
     }
     records.length=0; all.forEach(r=>records.push(r)); Object.assign(meta,firstMeta);
     populateFilters(); updateMeta(); refresh();
