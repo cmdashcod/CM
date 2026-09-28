@@ -1509,10 +1509,6 @@ function getXlsxWorker(){
   if(_xlsxWorker) return _xlsxWorker;
   const workerCode = `
     self.importScripts('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
-    const normHeader = v => String(v ?? '')
-      .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-      .toLowerCase().replace(/œ/g,'oe').replace(/æ/g,'ae')
-      .replace(/[^a-z0-9]+/g,'');
     const HINTS = [
       'date','datefacture','dateversement','semaine','week','montant','crbt','frais',
       'montantenattente','statutdupaiement','etatcod','segment','tranchesderetard',
@@ -1521,6 +1517,10 @@ function getXlsxWorker(){
       'delai','creationlivreur','creationpr','livraisoncod','crbtpr','livraisonversement',
       'statutcolis','flagnonverse','verse'
     ];
+    const normHeader = v => String(v ?? '')
+      .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')
+      .toLowerCase().replace(/œ/g,'oe').replace(/æ/g,'ae')
+      .replace(/[^a-z0-9]+/g,'');
     function scoreHeader(row){
       if(!Array.isArray(row)) return 0;
       let score=0;
@@ -1536,46 +1536,81 @@ function getXlsxWorker(){
       }
       return score;
     }
+    const files=[];
+    let processing=false;
     self.onmessage = function(ev){
       const data=ev.data||{};
       try{
-        const wb=XLSX.read(data.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false});
-        let bestSheet=null, bestHeader=0, bestScore=-1, bestDataRows=-1;
-        // IMPORTANT : ne jamais utiliser sheet_to_json(...).slice(...) pour la recherche
-        // de l'en-tête : sur un fichier de 170 Mo cela convertit toute la feuille en
-        // mémoire avant le slice et peut faire croire qu'il n'y a aucune donnée.
-        for(const name of wb.SheetNames){
-          const ws=wb.Sheets[name];
-          const ref=ws['!ref'];
-          if(!ref) continue;
-          const rg=XLSX.utils.decode_range(ref);
-          const maxScan=Math.min(rg.e.r,199);
-          for(let r=rg.s.r;r<=maxScan;r++){
-            const row=[];
-            for(let c=rg.s.c;c<=rg.e.c;c++){
-              const cell=ws[XLSX.utils.encode_cell({r,c})];
-              row.push(cell ? cell.v : '');
-            }
-            const sc=scoreHeader(row);
-            const dataRows=Math.max(0,rg.e.r-r);
-            if(sc>bestScore || (sc===bestScore && dataRows>bestDataRows)){
-              bestScore=sc; bestSheet=ws; bestHeader=r; bestDataRows=dataRows;
+        if(data.type==='prepare'){
+          const wb=XLSX.read(data.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false});
+          let best=null,bestHeader=0,bestScore=-1,bestDataRows=-1,bestName='';
+          for(const name of wb.SheetNames){
+            const ws=wb.Sheets[name];
+            const ref=ws && ws['!ref'];
+            if(!ref) continue;
+            const rg=XLSX.utils.decode_range(ref);
+            const maxScan=Math.min(rg.e.r,199);
+            for(let r=rg.s.r;r<=maxScan;r++){
+              const row=[];
+              for(let c=rg.s.c;c<=rg.e.c;c++){
+                const cell=ws[XLSX.utils.encode_cell({r,c})];
+                row.push(cell ? cell.v : '');
+              }
+              const sc=scoreHeader(row);
+              const dataRows=Math.max(0,rg.e.r-r);
+              if(sc>bestScore || (sc===bestScore && dataRows>bestDataRows)){
+                best={ws,rg}; bestHeader=r; bestScore=sc; bestDataRows=dataRows; bestName=name;
+              }
             }
           }
-        }
-        if(!bestSheet){
-          const first=wb.SheetNames[0];
-          bestSheet=first ? wb.Sheets[first] : null;
-          bestHeader=0; bestScore=0;
-        }
-        if(!bestSheet){
-          self.postMessage({type:'done', rows:[], headerRow:0, headerScore:0});
+          if(!best){
+            self.postMessage({type:'prepared',ok:false,message:'Aucune feuille exploitable dans '+data.name});
+            return;
+          }
+          const headerRange={s:{r:bestHeader,c:best.rg.s.c},e:{r:bestHeader,c:best.rg.e.c}};
+          const hRows=XLSX.utils.sheet_to_json(best.ws,{header:1,defval:'',blankrows:false,range:headerRange});
+          const headers=(hRows[0]||[]).map(v=>String(v??''));
+          if(!headers.length){
+            self.postMessage({type:'prepared',ok:false,message:'Aucun en-tête détecté dans '+data.name});
+            return;
+          }
+          const state={
+            name:data.name, ws:best.ws, startCol:best.rg.s.c, endCol:best.rg.e.c,
+            headerRow:bestHeader, lastRow:best.rg.e.r, rowCount:Math.max(0,best.rg.e.r-bestHeader), headers
+          };
+          const id=files.push(state)-1;
+          self.postMessage({type:'prepared',ok:true,id,headers,rowCount:state.rowCount,sheet:bestName,headerRow:bestHeader,headerScore:bestScore});
           return;
         }
-        const raw=XLSX.utils.sheet_to_json(bestSheet,{header:1,defval:'',range:bestHeader,blankrows:false});
-        self.postMessage({type:'done', rows:raw, headerRow:bestHeader, headerScore:bestScore});
+        if(data.type==='process'){
+          if(processing) throw new Error('Un traitement est déjà en cours.');
+          processing=true;
+          const chunkSize=30000;
+          try{
+            let globalDone=0;
+            const total=files.reduce((n,f)=>n+f.rowCount,0);
+            for(let fi=0;fi<files.length;fi++){
+              const f=files[fi];
+              for(let start=f.headerRow+1; start<=f.lastRow; start+=chunkSize){
+                const end=Math.min(f.lastRow,start+chunkSize-1);
+                const rows=XLSX.utils.sheet_to_json(f.ws,{header:1,defval:'',blankrows:false,range:{s:{r:start,c:f.startCol},e:{r:end,c:f.endCol}}});
+                if(rows.length){
+                  globalDone += rows.length;
+                  self.postMessage({type:'chunk',fileIndex:fi,fileName:f.name,rows,done:globalDone,total});
+                }
+              }
+            }
+            self.postMessage({type:'processDone',total});
+          }finally{ processing=false; }
+          return;
+        }
+        if(data.type==='clear'){
+          files.length=0;
+          return;
+        }
       }catch(err){
-        self.postMessage({type:'error', message:err && err.message ? err.message : String(err)});
+        self.postMessage({type:'error',stage:data.type,message:err&&err.message?err.message:String(err)});
+        if(data.type==='process') processing=false;
       }
     };
   `;
@@ -1584,20 +1619,21 @@ function getXlsxWorker(){
   return _xlsxWorker;
 }
 
-function parseOneFileInWorker(file, buffer){
+function prepareOneFileInWorker(file,buffer){
   return new Promise((resolve,reject)=>{
     const worker=getXlsxWorker();
     const handler=ev=>{
-      if(ev.data?.type==='done'){
+      const d=ev.data||{};
+      if(d.type==='prepared'){
         worker.removeEventListener('message',handler);
-        resolve(ev.data.rows||[]);
-      }else if(ev.data?.type==='error'){
+        if(d.ok) resolve(d); else reject(new Error(d.message||'Impossible de préparer le fichier.'));
+      }else if(d.type==='error' && d.stage==='prepare'){
         worker.removeEventListener('message',handler);
-        reject(new Error(ev.data.message||'Erreur pendant l’analyse du fichier.'));
+        reject(new Error(d.message||'Erreur pendant l’analyse du fichier.'));
       }
     };
     worker.addEventListener('message',handler);
-    try{ worker.postMessage({buffer},[buffer]); }
+    try{ worker.postMessage({type:'prepare',name:file.name,buffer},[buffer]); }
     catch(err){ worker.removeEventListener('message',handler); reject(err); }
   });
 }
@@ -1607,56 +1643,48 @@ async function parseFiles(files){
   const allowed=/\.(xlsx|xls|csv)$/i;
   if(files.some(f=>!allowed.test(f.name))){hideLoadProgress();showStatus('❌ Un ou plusieurs fichiers ne sont pas au format Excel/CSV.',true);return;}
   try{
-    const allRows=[];
-    let baseHdrs=null;
+    _xlsxWorker=getXlsxWorker();
+    _xlsxWorker.postMessage({type:'clear'});
+    let baseHdrs=null, totalRows=0;
+    const prepared=[];
     for(let fi=0;fi<files.length;fi++){
       const file=files[fi];
-      const fileBase=5+(fi/files.length)*70;
+      const fileBase=5+(fi/files.length)*55;
       setLoadProgress(fileBase,`Lecture ${fi+1}/${files.length} : ${file.name}`,'Chargement des fichiers');
       await nextFrame();
-
       const buffer=await new Promise((resolve,reject)=>{
         const r=new FileReader();
         r.onprogress=e=>{
           if(e.lengthComputable){
             const local=e.loaded/e.total;
-            const p=fileBase+local*(25/files.length);
-            setLoadProgress(p,`Lecture ${fi+1}/${files.length} : ${(e.loaded/1024/1024).toFixed(1)} / ${(e.total/1024/1024).toFixed(1)} Mo`,'Chargement des fichiers');
+            setLoadProgress(fileBase+local*(25/files.length),`Lecture ${fi+1}/${files.length} : ${(e.loaded/1024/1024).toFixed(1)} / ${(e.total/1024/1024).toFixed(1)} Mo`,'Chargement des fichiers');
           }
         };
-        r.onload=()=>resolve(r.result);
-        r.onerror=()=>reject(new Error('Impossible de lire '+file.name));
+        r.onload=()=>resolve(r.result); r.onerror=()=>reject(new Error('Impossible de lire '+file.name));
         r.readAsArrayBuffer(file);
       });
-
       setLoadProgress(fileBase+28/files.length,`Analyse de ${file.name} dans un processus séparé…`,'Analyse du fichier');
       await nextFrame();
-      const raw=await parseOneFileInWorker(file,buffer);
-      await nextFrame();
-
-      if(!raw||raw.length<2) continue;
-      // Le worker a déjà repéré la vraie ligne d'en-tête, même si le gros fichier
-      // contient des lignes de titre avant les colonnes.
-      const hdrs=raw[0].map(v=>String(v??''));
-      if(!baseHdrs){
-        baseHdrs=hdrs;
-      }else{
-        const norm=h=>String(h).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[\s\-_\/]+/g,'');
-        const same=baseHdrs.length===hdrs.length && baseHdrs.every((h,i)=>norm(h)===norm(hdrs[i]));
+      const info=await prepareOneFileInWorker(file,buffer);
+      prepared.push(info); totalRows+=info.rowCount;
+      if(!baseHdrs) baseHdrs=info.headers;
+      else {
+        const norm=h=>String(h).normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().trim().replace(/[\s\-_\/]+/g,'');
+        const same=baseHdrs.length===info.headers.length && baseHdrs.every((h,i)=>norm(h)===norm(info.headers[i]));
         if(!same) throw new Error(`La structure de « ${file.name} » est différente du premier fichier.`);
       }
-      // Évite le spread (...rows) sur les très gros fichiers : cela peut faire
-      // planter le navigateur avec plusieurs centaines de milliers de lignes.
-      for(let ri=1;ri<raw.length;ri++) allRows.push(raw[ri]);
-      setLoadProgress(8+((fi+1)/files.length)*68,`${fInt(allRows.length)} lignes chargées…`,'Préparation des données');
+      setLoadProgress(fileBase+50/files.length,`${fInt(totalRows)} lignes détectées dans ${fi+1}/${files.length} fichier(s)…`,'Préparation des données');
       await nextFrame();
     }
-    if(!baseHdrs||!allRows.length){hideLoadProgress();showStatus('❌ Aucun fichier contenant des lignes de données.',true);return;}
-    _rawHdrs=baseHdrs; _rawRows=allRows;
-    setLoadProgress(82,`${fInt(_rawRows.length)} lignes détectées. Association automatique des colonnes…`,'Préparation');
+    if(!baseHdrs||!totalRows){hideLoadProgress();showStatus('❌ Aucun fichier contenant des lignes de données.',true);return;}
+    _rawHdrs=baseHdrs; _rawRows=[];
+    setLoadProgress(68,`${fInt(totalRows)} lignes détectées. Association automatique des colonnes…`,'Préparation');
     await nextFrame();
     buildColMap(_rawHdrs);
-    setLoadProgress(100,`${fInt(_rawRows.length)} lignes prêtes. Les colonnes ont été associées automatiquement lorsque reconnues.`,'Fichiers prêts');
+    // Les données restent dans le Worker. On ne transfère surtout pas les 757k lignes d'un coup.
+    window.__workerTotalRows=totalRows;
+    window.__workerPreparedFiles=prepared;
+    setLoadProgress(100,`${fInt(totalRows)} lignes prêtes. Les colonnes ont été associées automatiquement lorsque reconnues.`,'Fichiers prêts');
     setTimeout(hideLoadProgress,250);
   }catch(err){
     hideLoadProgress();
@@ -1740,17 +1768,15 @@ async function applyMapping(){
   FIELD_DEFS.forEach(f=>{
     const v=document.getElementById('map_'+f.key)?.value ?? '-1';
     const n=Number(v);
-    if(Number.isInteger(n) && n>=0 && n<_rawHdrs.length){
-      idx[f.key]=n;
-      savedMapping[f.key]=_rawHdrs[n];
-    }
+    if(Number.isInteger(n) && n>=0 && n<_rawHdrs.length){ idx[f.key]=n; savedMapping[f.key]=_rawHdrs[n]; }
   });
   try{ localStorage.setItem('gpl_column_mapping',JSON.stringify(savedMapping)); }catch(e){}
   const missing=FIELD_DEFS.filter(f=>f.req&&(idx[f.key]===undefined||idx[f.key]<0)).map(f=>f.label);
   if(missing.length){showStatus('❌ Champs requis manquants : '+missing.join(', '),true);return;}
 
   document.getElementById('mapModal').classList.remove('show');
-  setLoadProgress(2,`Préparation de ${fInt(_rawRows.length)} lignes…`,'Importation des données');
+  const total=Number(window.__workerTotalRows||0);
+  setLoadProgress(2,`Traitement de ${fInt(total)} lignes par blocs de 30 000…`,'Importation des données');
   await nextFrame();
 
   const cv=(row,k)=>idx[k]!==undefined&&idx[k]>=0?row[idx[k]]??'':'';
@@ -1762,34 +1788,46 @@ async function applyMapping(){
     let s=String(v).trim().replace(/\u00a0/g,' ').replace(/\s/g,'');
     if(s.includes(',') && s.includes('.')) s=s.replace(/\./g,'').replace(',','.');
     else if(s.includes(',')) s=s.replace(',','.');
-    const n=Number(s);
-    return Number.isFinite(n)?n:0;
+    const n=Number(s); return Number.isFinite(n)?n:0;
   };
 
-  const total=_rawRows.length;
-  const newR=new Array(total);
-  const chunk=1000;
-  for(let base=0;base<total;base+=chunk){
-    const end=Math.min(total,base+chunk);
-    for(let i=base;i<end;i++){
-      const r=_rawRows[i];
-      newR[i]={
-        d:toDate(cv(r,'d')), w:String(cv(r,'w')), crbt:sf(cv(r,'crbt')), fr:sf(cv(r,'fr')), p:sf(cv(r,'p')),
-        sp:String(cv(r,'sp')), ec:String(cv(r,'ec')), s:String(cv(r,'s')), t:String(cv(r,'t')),
-        c:String(cv(r,'c')), n:String(cv(r,'n')), lf:String(cv(r,'lf')), lr:String(cv(r,'lr')), v:String(cv(r,'v')), ca:String(cv(r,'ca')), co:String(cv(r,'co')),
-        a1:sf(cv(r,'a1')), a2:sf(cv(r,'a2')), a3:sf(cv(r,'a3')), a4:sf(cv(r,'a4')), a5:sf(cv(r,'a5')),
-        sc:String(cv(r,'sc')), fv:String(cv(r,'fv'))
-      };
-    }
-    setLoadProgress(5+(end/total)*55,`Traitement : ${fInt(end)} / ${fInt(total)} lignes…`,'Importation des données');
-    await nextFrame();
-  }
+  const newR=[];
+  let processed=0;
+  const worker=getXlsxWorker();
+  await new Promise((resolve,reject)=>{
+    const handler=ev=>{
+      const d=ev.data||{};
+      if(d.type==='chunk'){
+        const rows=d.rows||[];
+        for(let i=0;i<rows.length;i++){
+          const r=rows[i];
+          newR.push({
+            d:toDate(cv(r,'d')), w:String(cv(r,'w')), crbt:sf(cv(r,'crbt')), fr:sf(cv(r,'fr')), p:sf(cv(r,'p')),
+            sp:String(cv(r,'sp')), ec:String(cv(r,'ec')), s:String(cv(r,'s')), t:String(cv(r,'t')),
+            c:String(cv(r,'c')), n:String(cv(r,'n')), lf:String(cv(r,'lf')), lr:String(cv(r,'lr')), v:String(cv(r,'v')), ca:String(cv(r,'ca')), co:String(cv(r,'co')),
+            a1:sf(cv(r,'a1')), a2:sf(cv(r,'a2')), a3:sf(cv(r,'a3')), a4:sf(cv(r,'a4')), a5:sf(cv(r,'a5')),
+            sc:String(cv(r,'sc')), fv:String(cv(r,'fv'))
+          });
+        }
+        processed=d.done||newR.length;
+        setLoadProgress(5+(processed/Math.max(1,total))*55,`Traitement : ${fInt(processed)} / ${fInt(total)} lignes…`,'Importation des données');
+      }else if(d.type==='processDone'){
+        worker.removeEventListener('message',handler); resolve();
+      }else if(d.type==='error' && d.stage==='process'){
+        worker.removeEventListener('message',handler); reject(new Error(d.message||'Erreur pendant le traitement.'));
+      }
+    };
+    worker.addEventListener('message',handler);
+    try{ worker.postMessage({type:'process'}); }
+    catch(err){ worker.removeEventListener('message',handler); reject(err); }
+  });
 
+  _rawRows=[];
   setLoadProgress(64,'Calcul des filtres et des statistiques…','Finalisation');
   await nextFrame();
   const dates=newR.map(r=>r.d).filter(Boolean).sort();
   const newMeta={
-    sourceFile:_pendingFile?.name||'Fichier importé', rowCount:newR.length,
+    sourceFile:_pendingFiles.length>1?_pendingFiles.map(f=>f.name).join(', '):(_pendingFile?.name||'Fichier importé'), rowCount:newR.length,
     dateMin:dates[0]||'', dateMax:dates[dates.length-1]||'',
     weeks:[...new Set(newR.map(r=>r.w).filter(Boolean))].sort(),
     cities:[...new Set(newR.map(r=>r.v).filter(Boolean))].sort(),
