@@ -1484,15 +1484,9 @@ async function applyMapping(){
   showStatus(`✅ ${fInt(newR.length)} lignes chargées — CRBT depuis "${crbtColumnName}" : ${fCur(importedCRBT)} — "${newMeta.sourceFile}"`);
   const savedAt=new Date().toLocaleString('fr-FR');
   lockUpload(savedAt);
-  // Après l'association des colonnes, ouvrir la configuration GitHub
-  // uniquement si aucun token n'est encore enregistré. Sinon, sauvegarder directement.
-  setTimeout(()=>{
-    if(getGitHubToken()){
-      saveCurrentDataToGitHub();
-    }else{
-      openGitHubConfig('Configuration requise pour sauvegarder automatiquement data.json dans GitHub.');
-    }
-  },120);
+  // Sauvegarde GitHub automatique après l'association des colonnes.
+  // Si un token existe déjà dans la session, aucun écran supplémentaire n'est affiché.
+  setTimeout(()=>saveCurrentDataToGitHub(),120);
 }
 
 function lockUpload(savedAt){
@@ -1514,236 +1508,151 @@ function unlockImport(){
 document.getElementById('unlockBtn').addEventListener('click', unlockImport);
 
 
-/* ════════════ GITHUB PAGES — LECTURE + SAUVEGARDE AUTOMATIQUE data.json ════════════
-   - Le dashboard LIT data.json au démarrage.
-   - Après Upload + association des colonnes, data.json est sauvegardé automatiquement.
-   - L'écran d'authentification n'est affiché qu'après l'association des colonnes, si nécessaire.
+/* ════════════ GITHUB — DATA SPLIT LARGE VOLUME ════════════
+   - Supporte de très gros volumes (jusqu'à plusieurs centaines de milliers de lignes).
+   - Découpe automatiquement les données en fichiers JSON d'environ 900 Ko.
+   - Sauvegarde les morceaux via Git Blobs + Tree + un seul commit.
+   - Le dashboard recharge data_manifest.json puis tous les morceaux.
+   - Le token est demandé uniquement au moment de la première sauvegarde après association.
 */
-const DATA_JSON_URL='./data.json';
 const GH_OWNER='cmdashcod';
 const GH_REPO='CM';
 const GH_BRANCH='main';
-const GH_PATH='data.json';
 const GH_API_BASE='https://api.github.com';
+const GH_MANIFEST_PATH='data_manifest.json';
+const GH_PART_PREFIX='data';
+const GH_PART_TARGET_BYTES=900*1024;
+const GH_TOKEN_KEY='cmdash_github_token';
 
-// Authentification GitHub : le token est demandé une seule fois
-// puis conservé dans le stockage local de CE navigateur.
-// Aucun token n'est intégré dans le HTML.
-const GH_TOKEN_STORAGE_KEY='cmdash_github_token_v1';
-
-function getGitHubToken(){
-  try{return (localStorage.getItem(GH_TOKEN_STORAGE_KEY)||'').trim();}
-  catch(e){return '';}
-}
-
-function setGitHubToken(token){
-  const t=(token||'').trim();
-  if(!t) return false;
-  if(!/^(ghp_|github_pat_)/.test(t)) return false;
-  try{localStorage.setItem(GH_TOKEN_STORAGE_KEY,t);return true;}
-  catch(e){showStatus('❌ Impossible de mémoriser le token dans ce navigateur.',true);return false;}
-}
-
-function clearGitHubToken(){
-  try{localStorage.removeItem(GH_TOKEN_STORAGE_KEY);}catch(e){}
-}
-
-function openGitHubConfig(message=''){
-  const modal=document.getElementById('githubTokenModal');
-  const input=document.getElementById('githubTokenInput');
-  const error=document.getElementById('githubTokenError');
-  if(!modal) return;
-  error.textContent=message||'';
-  error.style.display=message?'block':'none';
-  if(input) input.value='';
-  modal.style.display='flex';
-  setTimeout(()=>input?.focus(),50);
-}
-
-function closeGitHubConfig(){
-  const modal=document.getElementById('githubTokenModal');
-  if(modal) modal.style.display='none';
-}
-
-function initGitHubConfig(){
-  const input=document.getElementById('githubTokenInput');
-  const save=document.getElementById('githubTokenSave');
-  const cancel=document.getElementById('githubTokenCancel');
-  if(!input||!save) return;
-  save.addEventListener('click',async()=>{
-    const token=input.value.trim();
-    if(!/^(ghp_|github_pat_)/.test(token)){
-      openGitHubConfig('Token non reconnu. Utilisez un PAT GitHub commençant par ghp_ ou github_pat_.');
-      return;
-    }
-    if(!setGitHubToken(token)){
-      openGitHubConfig('Impossible de mémoriser ce token dans le navigateur.');
-      return;
-    }
-    // Vérification immédiate de l'accès au dépôt.
-    try{
-      const url=`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}`;
-      const r=await fetch(url,{headers:{'Accept':'application/vnd.github+json','Authorization':'Bearer '+token,'X-GitHub-Api-Version':'2022-11-28'},cache:'no-store'});
-      if(!r.ok){
-        const d=await r.json().catch(()=>({}));
-        clearGitHubToken();
-        openGitHubConfig('GitHub refuse ce token (HTTP '+r.status+'). '+(d.message||'Vérifiez le dépôt et les permissions.'));
-        return;
-      }
-      closeGitHubConfig();
-      showStatus('🔐✅ Connexion GitHub validée. Sauvegarde automatique en cours…');
-      // Le token vient d'être validé : sauvegarder immédiatement les données
-      // qui viennent d'être importées et associées.
-      await saveCurrentDataToGitHub();
-    }catch(e){
-      showStatus('⚠️ Vérification GitHub impossible : '+(e.message||e),true);
-    }
-  });
-  cancel?.addEventListener('click',closeGitHubConfig);
-  input.addEventListener('keydown',e=>{if(e.key==='Enter')save.click();});
-  // IMPORTANT : ne jamais ouvrir la fenêtre au démarrage.
-  // Elle est ouverte uniquement par applyMapping(), après l'association des colonnes,
-  // ou après un HTTP 401 lors d'une sauvegarde.
-}
+function getGitHubToken(){ return (localStorage.getItem(GH_TOKEN_KEY)||'').trim(); }
+function setGitHubToken(t){ localStorage.setItem(GH_TOKEN_KEY,(t||'').trim()); }
+function clearGitHubToken(){ localStorage.removeItem(GH_TOKEN_KEY); }
 function utf8ToBase64(str){
-  const bytes=new TextEncoder().encode(str);
-  let out='';
-  const chunk=0x8000;
-  for(let i=0;i<bytes.length;i+=chunk){
-    out+=String.fromCharCode(...bytes.subarray(i,i+chunk));
-  }
+  const bytes=new TextEncoder().encode(str); let out=''; const chunk=0x8000;
+  for(let i=0;i<bytes.length;i+=chunk) out+=String.fromCharCode(...bytes.subarray(i,i+chunk));
   return btoa(out);
 }
-
-async function saveGitHubPart(filePath,payload,token,commitMessage){
-  const url=`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/contents/${filePath}`;
-  const headers={
-    'Accept':'application/vnd.github+json',
-    'Authorization':'Bearer '+token,
-    'X-GitHub-Api-Version':'2022-11-28',
-    'Content-Type':'application/json'
-  };
-  let sha='';
-  const getRes=await fetch(url+'?ref='+encodeURIComponent(GH_BRANCH)+'&_='+Date.now(),{
-    method:'GET',mode:'cors',cache:'no-store',headers
+function base64ToUtf8(b64){
+  const bin=atob(b64.replace(/\n/g,'')); const bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+function ghHeaders(token){
+  return {'Accept':'application/vnd.github+json','Authorization':'Bearer '+token,'X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'};
+}
+async function ghJson(url, options={}){
+  const r=await fetch(url,options); const d=await r.json().catch(()=>({}));
+  if(!r.ok){ const e=new Error(d.message||('HTTP '+r.status)); e.status=r.status; e.data=d; throw e; }
+  return d;
+}
+async function requestGitHubToken(){
+  let token=getGitHubToken();
+  if(token) return token;
+  token=prompt('🔐 Configuration GitHub\n\nEntrez votre token GitHub avec Contents → Read and write sur le dépôt CM.\n\nLe token sera conservé uniquement dans ce navigateur.');
+  if(!token) return null;
+  token=token.trim();
+  if(!/^(gh[pousr]_)/.test(token) && !token.startsWith('github_pat_')){
+    showStatus('❌ Format de token GitHub non reconnu.',true); return null;
+  }
+  showStatus('🔎 Vérification du token GitHub…');
+  try{
+    const me=await ghJson(GH_API_BASE+'/user',{headers:ghHeaders(token)});
+    setGitHubToken(token);
+    showStatus('✅ Token GitHub validé'+(me.login?' — '+me.login:'')+'.');
+    return token;
+  }catch(e){
+    if(e.status===401) showStatus('❌ HTTP 401 — token invalide, révoqué ou expiré.',true);
+    else showStatus('❌ Vérification GitHub impossible : '+e.message,true);
+    return null;
+  }
+}
+function makeParts(payload){
+  const records=payload.records||[];
+  const parts=[]; let current=[]; let currentBytes=0;
+  for(const row of records){
+    const rowText=JSON.stringify(row); const rowBytes=new TextEncoder().encode(rowText).length+2;
+    if(current.length && currentBytes+rowBytes>GH_PART_TARGET_BYTES){ parts.push(current); current=[]; currentBytes=0; }
+    current.push(row); currentBytes+=rowBytes;
+  }
+  if(current.length || !parts.length) parts.push(current);
+  const total=parts.length;
+  return parts.map((rows,i)=>({
+    meta:i===0?payload.meta:{}, savedAt:payload.savedAt, part:i+1, parts:total, records:rows
+  }));
+}
+async function getHeadTree(token){
+  const ref=await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/ref/heads/${encodeURIComponent(GH_BRANCH)}`,{headers:ghHeaders(token)});
+  const commit=await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/commits/${ref.object.sha}`,{headers:ghHeaders(token)});
+  return {refSha:ref.object.sha,commitSha:commit.sha,treeSha:commit.tree.sha};
+}
+async function readManifest(token){
+  try{
+    const d=await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_MANIFEST_PATH}?ref=${encodeURIComponent(GH_BRANCH)}&_=${Date.now()}`,{headers:ghHeaders(token)});
+    return JSON.parse(base64ToUtf8(d.content||''));
+  }catch(e){ if(e.status===404) return null; throw e; }
+}
+async function createBlob(token, json){
+  return ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/blobs`,{
+    method:'POST',headers:ghHeaders(token),body:JSON.stringify({content:json,encoding:'utf-8'})
   });
-  if(getRes.ok){
-    const current=await getRes.json();
-    sha=current.sha||'';
-  }else if(getRes.status!==404){
-    const d=await getRes.json().catch(()=>({}));
-    if(getRes.status===401){
-      clearGitHubToken();
-      openGitHubConfig('HTTP 401 — GitHub rejette ce token. Saisissez un nouveau token GitHub.');
-    }
-    throw new Error('Lecture '+filePath+' : HTTP '+getRes.status+' — '+(d.message||'Erreur GitHub'));
-  }
-
-  const json=JSON.stringify(payload);
-  const sizeMB=new TextEncoder().encode(json).length/1048576;
-  if(sizeMB>25) throw new Error(filePath+' reste trop volumineux ('+sizeMB.toFixed(1)+' Mo).');
-
-  const body={
-    message:commitMessage,
-    content:utf8ToBase64(json),
-    branch:GH_BRANCH
-  };
-  if(sha) body.sha=sha;
-
-  const putRes=await fetch(url,{method:'PUT',mode:'cors',headers,body:JSON.stringify(body)});
-  const putData=await putRes.json().catch(()=>({}));
-  if(!putRes.ok){
-    if(putRes.status===401){
-      clearGitHubToken();
-      openGitHubConfig('HTTP 401 — GitHub rejette ce token. Saisissez un nouveau token GitHub.');
-      throw new Error('HTTP 401 — token GitHub refusé.');
-    }
-    if(putRes.status===403) throw new Error(filePath+' : HTTP 403 — '+(putData.message||'permission GitHub refusée')+'. Le token doit avoir Contents: Read and write.');
-    if(putRes.status===409) throw new Error(filePath+' : HTTP 409 — conflit. Réessayez.');
-    throw new Error(filePath+' : '+(putData.message||('HTTP '+putRes.status)));
-  }
-  return true;
 }
-
-async function saveCurrentDataToGitHub({commitMessage='Update dashboard data depuis le dashboard'}={}){
+async function deleteOldParts(token, oldManifest, newNames, treeEntries){
+  if(!oldManifest?.files) return;
+  const keep=new Set(newNames);
+  for(const name of oldManifest.files){ if(!keep.has(name)) treeEntries.push({path:name,mode:'100644',type:'blob',sha:null}); }
+}
+async function saveCurrentDataToGitHub(){
   if(!records.length){showStatus('⚠️ Aucune donnée à enregistrer dans GitHub.',true);return false;}
-  const token=getGitHubToken();
-  if(!token || !/^(ghp_|github_pat_)/.test(token)){
-    showStatus('❌ Token GitHub absent ou format non reconnu.',true);
-    return false;
-  }
-
-  // La base est répartie en 4 fichiers pour éviter qu'un seul JSON soit trop volumineux.
-  const totalParts=4;
-  const total=records.length;
-  const parts=[];
-  for(let i=0;i<totalParts;i++){
-    const start=Math.floor(i*total/totalParts);
-    const end=Math.floor((i+1)*total/totalParts);
-    parts.push(records.slice(start,end));
-  }
-  const files=['data.json','data2.json','data3.json','data4.json'];
-  const savedAt=new Date().toLocaleString('fr-FR');
-
-  showStatus('☁️ Sauvegarde de '+fInt(total)+' lignes en 4 fichiers GitHub…');
+  const token=await requestGitHubToken(); if(!token) return false;
+  const payload={meta:{...meta},records:[...records],savedAt:new Date().toLocaleString('fr-FR')};
+  const parts=makeParts(payload); const names=parts.map((_,i)=>i===0?'data.json':`data${i+1}.json`);
+  showStatus(`☁️ Préparation de ${fInt(records.length)} lignes en ${parts.length} fichiers…`);
   try{
-    for(let i=0;i<files.length;i++){
-      const m={...meta,part:i+1,totalParts};
-      const payload={meta:m,records:parts[i],savedAt};
-      const sizeMB=new TextEncoder().encode(JSON.stringify(payload)).length/1048576;
-      showStatus('☁️ Sauvegarde '+files[i]+' ('+(i+1)+'/4) — '+sizeMB.toFixed(1)+' Mo…');
-      await saveGitHubPart(files[i],payload,token,commitMessage+' — '+files[i]);
+    const old=await readManifest(token); const head=await getHeadTree(token); const entries=[];
+    for(let i=0;i<parts.length;i++){
+      const json=JSON.stringify(parts[i]);
+      const size=new TextEncoder().encode(json).length;
+      showStatus(`☁️ Préparation fichier ${i+1}/${parts.length} — ${(size/1024).toFixed(0)} Ko`);
+      const blob=await createBlob(token,json);
+      entries.push({path:names[i],mode:'100644',type:'blob',sha:blob.sha});
     }
-    showStatus('☁️✅ Sauvegarde automatique terminée : '+fInt(total)+' lignes dans data.json + data2.json + data3.json + data4.json');
-    return true;
-  }catch(err){
-    console.error(err);
-    showStatus('❌ Sauvegarde GitHub impossible : '+(err?.message||String(err)),true);
-    return false;
-  }
-}
-
-async function loadJsonPart(fileName){
-  const r=await fetch('./'+fileName+'?ts='+Date.now(),{cache:'no-store'});
-  if(r.status===404) return null;
-  if(!r.ok) throw new Error(fileName+' HTTP '+r.status);
-  const p=await r.json();
-  if(!p || !Array.isArray(p.records)) throw new Error(fileName+' invalide');
-  return p;
-}
-
-async function loadFromDataJson(){
-  try{
-    // data.json reste la première partie ; les trois autres sont ajoutées automatiquement.
-    const parts=await Promise.all(['data.json','data2.json','data3.json','data4.json'].map(loadJsonPart));
-    const valid=parts.filter(Boolean);
-    if(!valid.length) throw new Error('Aucun fichier de données trouvé');
-
-    records.length=0;
-    valid.forEach(p=>p.records.forEach(r=>records.push(r)));
-    Object.assign(meta,valid[0].meta||{});
-    delete meta.part;
-    delete meta.totalParts;
-    meta.rowCount=records.length;
-
-    populateFilters();
-    updateMeta();
-    refresh();
-
-    if(records.length){
-      lockUpload(valid[0].savedAt||'');
-      showStatus('☁️ Data chargé depuis '+valid.length+' fichier(s) — '+fInt(records.length)+' lignes');
-    }
+    if(old?.files){ for(const oldName of old.files){ if(!names.includes(oldName)) entries.push({path:oldName,mode:'100644',type:'blob',sha:null}); } }
+    const manifest={version:2,parts:parts.length,files:names,rowCount:records.length,savedAt:payload.savedAt,partTargetBytes:GH_PART_TARGET_BYTES};
+    const mb=await createBlob(token,JSON.stringify(manifest));
+    entries.push({path:GH_MANIFEST_PATH,mode:'100644',type:'blob',sha:mb.sha});
+    showStatus('☁️ Création du commit GitHub…');
+    const tree=await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/trees`,{method:'POST',headers:ghHeaders(token),body:JSON.stringify({base_tree:head.treeSha,tree:entries})});
+    const commit=await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/commits`,{method:'POST',headers:ghHeaders(token),body:JSON.stringify({message:`Update data split (${parts.length} fichiers)`,tree:tree.sha,parents:[head.commitSha]})});
+    await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/refs/heads/${encodeURIComponent(GH_BRANCH)}`,{method:'PATCH',headers:ghHeaders(token),body:JSON.stringify({sha:commit.sha,force:false})});
+    showStatus(`☁️✅ Sauvegarde GitHub terminée — ${fInt(records.length)} lignes / ${parts.length} fichiers`);
     return true;
   }catch(e){
-    console.warn('Données JSON non chargées :',e);
-    return false;
+    if(e.status===401){clearGitHubToken();showStatus('❌ HTTP 401 — token GitHub invalide ou expiré. Il sera redemandé au prochain import.',true);}
+    else if(e.status===403) showStatus('❌ HTTP 403 — le token doit avoir Contents → Read and write sur CM.',true);
+    else if(e.status===409) showStatus('❌ HTTP 409 — le dépôt a changé pendant la sauvegarde. Réessayez.',true);
+    else showStatus('❌ Sauvegarde GitHub impossible : '+(e.message||e),true);
+    console.error(e); return false;
   }
 }
-
-(async function restore(){
-  await loadFromDataJson();
-})();
+async function loadFromDataJson(){
+  try{
+    let manifest;
+    const mr=await fetch('./'+GH_MANIFEST_PATH+'?ts='+Date.now(),{cache:'no-store'});
+    if(mr.ok) manifest=await mr.json();
+    const files=manifest?.files?.length?manifest.files:['data.json'];
+    const all=[]; let firstMeta={}; let savedAt='';
+    for(const file of files){
+      const r=await fetch('./'+file+'?ts='+Date.now(),{cache:'no-store'}); if(!r.ok) throw new Error(file+' HTTP '+r.status);
+      const p=await r.json(); if(!Array.isArray(p.records)) throw new Error(file+' invalide');
+      all.push(...p.records); if(p.meta&&Object.keys(p.meta).length) firstMeta=p.meta; savedAt=p.savedAt||savedAt;
+    }
+    records.length=0; all.forEach(r=>records.push(r)); Object.assign(meta,firstMeta);
+    populateFilters(); updateMeta(); refresh();
+    if(all.length){lockUpload(savedAt);showStatus('☁️ Data chargé — '+fInt(all.length)+' lignes / '+files.length+' fichiers');}
+    return true;
+  }catch(e){console.warn('Données split non chargées :',e);return false;}
+}
+(async function restore(){await loadFromDataJson();})();
 
 /* ════════════ AUTO-FIT KPI VALUES ════════════ */
 function fitKpiValues(){
@@ -1781,6 +1690,5 @@ window.addEventListener('resize', fitKpiValues);
     <span class="footer-pill" id="footerPeriod">📅 —</span>
   </div>
 
-\n<!-- Configuration GitHub : affichée uniquement après association des colonnes, ou après un 401 -->\n<div id="githubTokenModal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.68);align-items:center;justify-content:center;padding:20px;">\n  <div style="width:min(520px,100%);background:#fff;border-radius:16px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.35);font-family:Arial,sans-serif;">\n    <h2 style="margin:0 0 8px;font-size:22px;">🔐 Configuration GitHub</h2>\n    <p style="margin:0 0 16px;line-height:1.5;color:#444;">\n      Entrez votre token GitHub une seule fois. Il sera conservé dans le stockage local de ce navigateur et utilisé automatiquement pour sauvegarder <b>data.json</b>.\n    </p>\n    <p style="margin:0 0 12px;font-size:13px;color:#666;">\n      Dépôt : <b>cmdashcod/CM</b> · Branche : <b>main</b> · Fichier : <b>data.json</b>\n    </p>\n    <input id="githubTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_... ou github_pat_..." style="width:100%;box-sizing:border-box;padding:12px;border:1px solid #bbb;border-radius:10px;font-size:15px;margin-bottom:10px;">\n    <div id="githubTokenError" style="display:none;color:#b00020;background:#fff0f0;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;"></div>\n    <div style="font-size:12px;color:#777;line-height:1.4;margin-bottom:16px;">\n      Le token doit avoir l'autorisation <b>Contents: Read and write</b> sur le dépôt <b>CM</b>. Le token n'est pas écrit dans le fichier HTML.\n    </div>\n    <div style="display:flex;gap:10px;justify-content:flex-end;">\n      <button id="githubTokenCancel" type="button" style="padding:10px 16px;border:1px solid #bbb;background:#fff;border-radius:9px;cursor:pointer;">Annuler</button>\n      <button id="githubTokenSave" type="button" style="padding:10px 16px;border:0;background:#111;color:#fff;border-radius:9px;cursor:pointer;font-weight:600;">Enregistrer le token</button>\n    </div>\n  </div>\n</div>\n<script>document.addEventListener('DOMContentLoaded',initGitHubConfig);</script>
 </body>
 </html>
