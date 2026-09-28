@@ -331,6 +331,21 @@
     .cod-lbl{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-top:2px}
     .cod-sub{font-size:11px;font-weight:700;margin-top:4px}
 
+    /* UPLOAD CHOOSER */
+    .upload-box{background:var(--modal-bg);border-radius:18px;padding:24px;max-width:560px;width:94%;box-shadow:0 24px 64px rgba(0,0,0,.5);color:var(--txt)}
+    .upload-ttl{font-size:17px;font-weight:900;color:var(--pin-ttl);margin-bottom:5px}
+    .upload-sub{font-size:11px;color:var(--txt2);line-height:1.5;margin-bottom:14px}
+    .drop-zone{border:2px dashed var(--accent);border-radius:14px;padding:30px 18px;text-align:center;background:rgba(0,137,150,.045);cursor:pointer;transition:.18s}
+    .drop-zone:hover,.drop-zone.drag{background:rgba(0,137,150,.11);transform:translateY(-1px)}
+    .drop-ico{font-size:34px;margin-bottom:7px}.drop-main{font-size:14px;font-weight:900;color:var(--txt)}
+    .drop-help{font-size:11px;color:var(--txt2);margin-top:5px}
+    .upload-list{display:none;max-height:150px;overflow:auto;margin-top:12px;border:1px solid var(--line);border-radius:9px;padding:8px}
+    .upload-list.show{display:block}.upload-item{font-size:11px;padding:5px 7px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
+    .upload-item:last-child{border-bottom:0}.upload-count{font-weight:800;color:var(--accent)}
+    .upload-acts{display:flex;gap:8px;margin-top:14px}.upload-acts button{flex:1;height:38px;border:0;border-radius:8px;cursor:pointer;font-weight:800;font-family:'Cairo',sans-serif}
+    .btn-upload-cancel{background:var(--modal-cancel-bg);color:var(--txt2)}.btn-upload-ok{background:var(--accent);color:#fff}
+    .btn-upload-ok:disabled{opacity:.45;cursor:not-allowed}
+
     /* PIN MODAL */
     .modal-bg{display:none;position:fixed;inset:0;background:rgba(10,30,40,.62);z-index:500;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
     .modal-bg.show{display:flex}
@@ -502,6 +517,24 @@
 </head>
 <body>
 
+<!-- UPLOAD CHOOSER -->
+<div class="modal-bg" id="uploadModal">
+  <div class="upload-box">
+    <div class="upload-ttl">📂 Importer des données</div>
+    <div class="upload-sub">Choisissez un seul fichier ou déposez plusieurs fichiers Excel/CSV en une seule fois. Les fichiers doivent avoir la même structure de colonnes.</div>
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-ico">⬆️</div>
+      <div class="drop-main">Glissez-déposez vos fichiers ici</div>
+      <div class="drop-help">ou cliquez pour sélectionner 1 ou plusieurs fichiers</div>
+    </div>
+    <div class="upload-list" id="uploadList"></div>
+    <div class="upload-acts">
+      <button class="btn-upload-cancel" id="uploadCancel">Annuler</button>
+      <button class="btn-upload-ok" id="uploadContinue" disabled>Continuer</button>
+    </div>
+  </div>
+</div>
+
 <!-- PIN MODAL -->
 <div class="modal-bg" id="pinModal">
   <div class="pin-box">
@@ -578,7 +611,7 @@
     </div>
   </div>
 </header>
-<input type="file" id="fileInp" accept=".xlsx,.xls,.csv" style="display:none"/>
+<input type="file" id="fileInp" accept=".xlsx,.xls,.csv" multiple style="display:none"/>
 
 <!-- MAIN LAYOUT -->
 <div class="layout" id="mainLayout">
@@ -1317,7 +1350,7 @@ function exportCSV(data){
 
 /* ════════════ UPLOAD / PIN / COLMAP ════════════ */
 const PIN='CMGPL';
-let _pendingFile=null, _rawHdrs=[], _rawRows=[];
+let _pendingFile=null, _pendingFiles=[], _rawHdrs=[], _rawRows=[];
 let _pinMode='upload'; // 'upload' ou 'admin'
 const FIELD_DEFS=[
   {key:'d',  label:'Date (facture / versement)', req:true,  hints:['=date','=créé le','=cree le','date création','date_création','datecreation','date cr','datecr','date_cr']},
@@ -1352,18 +1385,60 @@ function showStatus(msg,isErr=false){
 
 const fileInp = document.getElementById('fileInp');
 const importBtn = document.getElementById('importBtn');
+const uploadModal = document.getElementById('uploadModal');
+const dropZone = document.getElementById('dropZone');
+const uploadList = document.getElementById('uploadList');
+const uploadContinue = document.getElementById('uploadContinue');
+let _selectedFiles=[];
 
 function openPicker(){
   const fi = document.getElementById('fileInp');
   if(!fi) return;
   fi.disabled = false;
+  fi.value='';
   fi.click();
 }
-if(importBtn) importBtn.addEventListener('click', e=>{ e.stopPropagation(); openPicker(); });
-if(fileInp) fileInp.addEventListener('change', e=>{ const f=e.target.files[0]; if(f){e.target.value=''; openPin(f);} });
+function showUploadChooser(){
+  _selectedFiles=[];
+  renderSelectedFiles();
+  uploadModal.classList.add('show');
+}
+function renderSelectedFiles(){
+  if(!_selectedFiles.length){
+    uploadList.classList.remove('show');
+    uploadList.innerHTML='';
+    uploadContinue.disabled=true;
+    return;
+  }
+  uploadList.innerHTML='<div class="upload-count">'+_selectedFiles.length+' fichier(s) sélectionné(s)</div>'+_selectedFiles.map(f=>`<div class="upload-item"><span>📄 ${esc(f.name)}</span><span>${(f.size/1024/1024).toFixed(1)} Mo</span></div>`).join('');
+  uploadList.classList.add('show');
+  uploadContinue.disabled=false;
+}
+function acceptFiles(fileList){
+  const files=Array.from(fileList||[]).filter(f=>/\.(xlsx|xls|csv)$/i.test(f.name));
+  if(!files.length){showStatus('❌ Aucun fichier Excel/CSV valide.',true);return;}
+  _selectedFiles=files;
+  renderSelectedFiles();
+}
+if(importBtn) importBtn.addEventListener('click', e=>{ e.stopPropagation(); showUploadChooser(); });
+if(dropZone){
+  dropZone.addEventListener('click',openPicker);
+  ['dragenter','dragover'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();e.stopPropagation();dropZone.classList.add('drag');}));
+  ['dragleave','drop'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();e.stopPropagation();dropZone.classList.remove('drag');}));
+  dropZone.addEventListener('drop',e=>acceptFiles(e.dataTransfer.files));
+}
+if(fileInp) fileInp.addEventListener('change', e=>{ acceptFiles(e.target.files); e.target.value=''; });
+document.getElementById('uploadCancel').addEventListener('click',()=>uploadModal.classList.remove('show'));
+uploadContinue.addEventListener('click',()=>{
+  if(!_selectedFiles.length)return;
+  const files=_selectedFiles.slice();
+  uploadModal.classList.remove('show');
+  openPin(files);
+});
 
-function openPin(file){
-  _pendingFile=file;
+function openPin(files){
+  _pendingFile=files.length===1 ? files[0] : {name:files.map(f=>f.name).join(', ')};
+  _pendingFiles=files;
   _pinMode='upload';
   document.getElementById('pinInp').value='';
   document.getElementById('pinErr').textContent='';
@@ -1384,6 +1459,7 @@ document.getElementById('pinInp').addEventListener('keydown',e=>{if(e.key==='Ent
 document.getElementById('pinCancel').addEventListener('click',()=>{
   document.getElementById('pinModal').classList.remove('show');
   _pendingFile=null;
+  _pendingFiles=[];
   _pinMode='upload';
 });
 
@@ -1410,13 +1486,12 @@ async function validatePin(){
   if(document.getElementById('pinInp').value===PIN){
     document.getElementById('pinModal').classList.remove('show');
     if(_pendingFile){
-      const file=_pendingFile;
-      const pendingName=file.name;
-      _pendingFile={name:pendingName};
+      const files=_pendingFiles.slice();
+      const names=files.map(f=>f.name).join(', ');
       _pinMode='upload';
-      setLoadProgress(2,'Lecture du fichier '+file.name+'…','Chargement du fichier');
+      setLoadProgress(2,`Lecture de ${files.length} fichier(s)…`,'Chargement des fichiers');
       await nextFrame();
-      parseFile(file);
+      parseFiles(files);
     }else{
       _pinMode='upload';
     }
@@ -1428,43 +1503,57 @@ async function validatePin(){
   }
 }
 
-function parseFile(file){
-  const ext=file.name.split('.').pop().toLowerCase();
-  if(!['xlsx','xls','csv'].includes(ext)){hideLoadProgress();showStatus('❌ Format non supporté.',true);return;}
-  setLoadProgress(5,'Lecture du fichier '+file.name+'…','Chargement du fichier');
-  const r=new FileReader();
-  r.onprogress=e=>{
-    if(e.lengthComputable){
-      const p=5+(e.loaded/e.total)*35;
-      setLoadProgress(p,`Lecture : ${(e.loaded/1024/1024).toFixed(1)} / ${(e.total/1024/1024).toFixed(1)} Mo`,'Chargement du fichier');
-    }
-  };
-  r.onload=e=>{
-    setLoadProgress(42,'Analyse du fichier, veuillez patienter…','Traitement des données');
-    setTimeout(async()=>{
-      try{
-        await nextFrame();
-        const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
-        setLoadProgress(60,'Conversion des lignes…','Traitement des données');
-        await nextFrame();
-        const ws=wb.Sheets[wb.SheetNames[0]];
-        const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-        if(!raw||raw.length<2){hideLoadProgress();showStatus('❌ Fichier vide.',true);return;}
-        setLoadProgress(82,`${fInt(raw.length-1)} lignes détectées. Préparation de l’association…`,'Préparation');
-        await nextFrame();
-        _rawHdrs=raw[0].map(String); _rawRows=raw.slice(1);
-        buildColMap(_rawHdrs);
-        setLoadProgress(100,`${fInt(_rawRows.length)} lignes prêtes. Vous pouvez associer les colonnes.`,'Fichier prêt');
-        setTimeout(hideLoadProgress,180);
-      }catch(err){
-        hideLoadProgress();
-        showStatus('❌ Erreur : '+err.message,true);
-        console.error(err);
+async function parseFiles(files){
+  if(!files||!files.length){hideLoadProgress();return;}
+  const allowed=/\.(xlsx|xls|csv)$/i;
+  if(files.some(f=>!allowed.test(f.name))){hideLoadProgress();showStatus('❌ Un ou plusieurs fichiers ne sont pas au format Excel/CSV.',true);return;}
+  try{
+    const allRows=[];
+    let baseHdrs=null;
+    for(let fi=0;fi<files.length;fi++){
+      const file=files[fi];
+      const startPct=5+(fi/files.length)*75;
+      setLoadProgress(startPct,`Lecture ${fi+1}/${files.length} : ${file.name}`,'Chargement des fichiers');
+      await nextFrame();
+      const buffer=await new Promise((resolve,reject)=>{
+        const r=new FileReader();
+        r.onprogress=e=>{
+          if(e.lengthComputable){
+            const local=e.loaded/e.total;
+            const p=startPct+local*(70/files.length);
+            setLoadProgress(p,`Lecture ${fi+1}/${files.length} : ${(e.loaded/1024/1024).toFixed(1)} / ${(e.total/1024/1024).toFixed(1)} Mo`,'Chargement des fichiers');
+          }
+        };
+        r.onload=()=>resolve(r.result); r.onerror=()=>reject(new Error('Impossible de lire '+file.name));
+        r.readAsArrayBuffer(file);
+      });
+      await nextFrame();
+      const wb=XLSX.read(buffer,{type:'array',cellDates:true});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+      if(!raw||raw.length<2)continue;
+      const hdrs=raw[0].map(String);
+      if(!baseHdrs){
+        baseHdrs=hdrs;
+      }else{
+        const norm=h=>String(h).toLowerCase().trim().replace(/[\s\-_\/]/g,'');
+        const same=baseHdrs.length===hdrs.length && baseHdrs.every((h,i)=>norm(h)===norm(hdrs[i]));
+        if(!same) throw new Error(`La structure de « ${file.name} » est différente du premier fichier.`);
       }
-    },40);
-  };
-  r.onerror=()=>{hideLoadProgress();showStatus('❌ Impossible de lire le fichier.',true);};
-  r.readAsArrayBuffer(file);
+      allRows.push(...raw.slice(1));
+      setLoadProgress(5+((fi+1)/files.length)*75,`${fInt(allRows.length)} lignes chargées…`,'Préparation des données');
+      await nextFrame();
+    }
+    if(!baseHdrs||!allRows.length){hideLoadProgress();showStatus('❌ Aucun fichier contenant des lignes de données.',true);return;}
+    _rawHdrs=baseHdrs; _rawRows=allRows;
+    setLoadProgress(84,`${fInt(_rawRows.length)} lignes détectées. Préparation de l’association…`,'Préparation');
+    await nextFrame();
+    buildColMap(_rawHdrs);
+    setLoadProgress(100,`${fInt(_rawRows.length)} lignes prêtes. Vous pouvez associer les colonnes.`,'Fichiers prêts');
+    setTimeout(hideLoadProgress,180);
+  }catch(err){
+    hideLoadProgress();showStatus('❌ Erreur : '+err.message,true);console.error(err);
+  }
 }
 
 function autoMap(hdrs){
