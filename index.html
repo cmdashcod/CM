@@ -1517,7 +1517,7 @@ document.getElementById('unlockBtn').addEventListener('click', unlockImport);
 /* ════════════ GITHUB PAGES — LECTURE + SAUVEGARDE AUTOMATIQUE data.json ════════════
    - Le dashboard LIT data.json au démarrage.
    - Après Upload + association des colonnes, data.json est sauvegardé automatiquement.
-   - Aucun écran d'authentification n'est affiché.
+   - L'écran d'authentification n'est affiché qu'après l'association des colonnes, si nécessaire.
 */
 const DATA_JSON_URL='./data.json';
 const GH_OWNER='cmdashcod';
@@ -1601,7 +1601,9 @@ function initGitHubConfig(){
   });
   cancel?.addEventListener('click',closeGitHubConfig);
   input.addEventListener('keydown',e=>{if(e.key==='Enter')save.click();});
-  if(!getGitHubToken()) openGitHubConfig();
+  // IMPORTANT : ne jamais ouvrir la fenêtre au démarrage.
+  // Elle est ouverte uniquement par applyMapping(), après l'association des colonnes,
+  // ou après un HTTP 401 lors d'une sauvegarde.
 }
 function utf8ToBase64(str){
   const bytes=new TextEncoder().encode(str);
