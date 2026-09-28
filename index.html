@@ -1484,9 +1484,15 @@ async function applyMapping(){
   showStatus(`✅ ${fInt(newR.length)} lignes chargées — CRBT depuis "${crbtColumnName}" : ${fCur(importedCRBT)} — "${newMeta.sourceFile}"`);
   const savedAt=new Date().toLocaleString('fr-FR');
   lockUpload(savedAt);
-  // Sauvegarde GitHub automatique après l'association des colonnes.
-  // Si un token existe déjà dans la session, aucun écran supplémentaire n'est affiché.
-  setTimeout(()=>saveCurrentDataToGitHub(),120);
+  // Après l'association des colonnes, ouvrir la configuration GitHub
+  // uniquement si aucun token n'est encore enregistré. Sinon, sauvegarder directement.
+  setTimeout(()=>{
+    if(getGitHubToken()){
+      saveCurrentDataToGitHub();
+    }else{
+      openGitHubConfig('Configuration requise pour sauvegarder automatiquement data.json dans GitHub.');
+    }
+  },120);
 }
 
 function lockUpload(savedAt){
@@ -1574,9 +1580,7 @@ function initGitHubConfig(){
       openGitHubConfig('Impossible de mémoriser ce token dans le navigateur.');
       return;
     }
-    closeGitHubConfig();
-    showStatus('🔐 Token GitHub enregistré sur ce navigateur.');
-    // Vérification immédiate de l'accès au dépôt, sans modifier data.json.
+    // Vérification immédiate de l'accès au dépôt.
     try{
       const url=`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}`;
       const r=await fetch(url,{headers:{'Accept':'application/vnd.github+json','Authorization':'Bearer '+token,'X-GitHub-Api-Version':'2022-11-28'},cache:'no-store'});
@@ -1586,9 +1590,13 @@ function initGitHubConfig(){
         openGitHubConfig('GitHub refuse ce token (HTTP '+r.status+'). '+(d.message||'Vérifiez le dépôt et les permissions.'));
         return;
       }
-      showStatus('🔐✅ Connexion GitHub validée. Les prochains imports seront sauvegardés automatiquement.');
+      closeGitHubConfig();
+      showStatus('🔐✅ Connexion GitHub validée. Sauvegarde automatique en cours…');
+      // Le token vient d'être validé : sauvegarder immédiatement les données
+      // qui viennent d'être importées et associées.
+      await saveCurrentDataToGitHub();
     }catch(e){
-      showStatus('⚠️ Token enregistré, mais vérification GitHub impossible : '+(e.message||e),true);
+      showStatus('⚠️ Vérification GitHub impossible : '+(e.message||e),true);
     }
   });
   cancel?.addEventListener('click',closeGitHubConfig);
@@ -1744,6 +1752,6 @@ window.addEventListener('resize', fitKpiValues);
     <span class="footer-pill" id="footerPeriod">📅 —</span>
   </div>
 
-\n<!-- Configuration GitHub : affichée uniquement au premier lancement ou après un 401 -->\n<div id="githubTokenModal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.68);align-items:center;justify-content:center;padding:20px;">\n  <div style="width:min(520px,100%);background:#fff;border-radius:16px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.35);font-family:Arial,sans-serif;">\n    <h2 style="margin:0 0 8px;font-size:22px;">🔐 Configuration GitHub</h2>\n    <p style="margin:0 0 16px;line-height:1.5;color:#444;">\n      Entrez votre token GitHub une seule fois. Il sera conservé dans le stockage local de ce navigateur et utilisé automatiquement pour sauvegarder <b>data.json</b>.\n    </p>\n    <p style="margin:0 0 12px;font-size:13px;color:#666;">\n      Dépôt : <b>cmdashcod/CM</b> · Branche : <b>main</b> · Fichier : <b>data.json</b>\n    </p>\n    <input id="githubTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_... ou github_pat_..." style="width:100%;box-sizing:border-box;padding:12px;border:1px solid #bbb;border-radius:10px;font-size:15px;margin-bottom:10px;">\n    <div id="githubTokenError" style="display:none;color:#b00020;background:#fff0f0;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;"></div>\n    <div style="font-size:12px;color:#777;line-height:1.4;margin-bottom:16px;">\n      Le token doit avoir l'autorisation <b>Contents: Read and write</b> sur le dépôt <b>CM</b>. Le token n'est pas écrit dans le fichier HTML.\n    </div>\n    <div style="display:flex;gap:10px;justify-content:flex-end;">\n      <button id="githubTokenCancel" type="button" style="padding:10px 16px;border:1px solid #bbb;background:#fff;border-radius:9px;cursor:pointer;">Annuler</button>\n      <button id="githubTokenSave" type="button" style="padding:10px 16px;border:0;background:#111;color:#fff;border-radius:9px;cursor:pointer;font-weight:600;">Enregistrer le token</button>\n    </div>\n  </div>\n</div>\n<script>document.addEventListener('DOMContentLoaded',initGitHubConfig);</script>
+\n<!-- Configuration GitHub : affichée uniquement après association des colonnes, ou après un 401 -->\n<div id="githubTokenModal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.68);align-items:center;justify-content:center;padding:20px;">\n  <div style="width:min(520px,100%);background:#fff;border-radius:16px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.35);font-family:Arial,sans-serif;">\n    <h2 style="margin:0 0 8px;font-size:22px;">🔐 Configuration GitHub</h2>\n    <p style="margin:0 0 16px;line-height:1.5;color:#444;">\n      Entrez votre token GitHub une seule fois. Il sera conservé dans le stockage local de ce navigateur et utilisé automatiquement pour sauvegarder <b>data.json</b>.\n    </p>\n    <p style="margin:0 0 12px;font-size:13px;color:#666;">\n      Dépôt : <b>cmdashcod/CM</b> · Branche : <b>main</b> · Fichier : <b>data.json</b>\n    </p>\n    <input id="githubTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_... ou github_pat_..." style="width:100%;box-sizing:border-box;padding:12px;border:1px solid #bbb;border-radius:10px;font-size:15px;margin-bottom:10px;">\n    <div id="githubTokenError" style="display:none;color:#b00020;background:#fff0f0;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;"></div>\n    <div style="font-size:12px;color:#777;line-height:1.4;margin-bottom:16px;">\n      Le token doit avoir l'autorisation <b>Contents: Read and write</b> sur le dépôt <b>CM</b>. Le token n'est pas écrit dans le fichier HTML.\n    </div>\n    <div style="display:flex;gap:10px;justify-content:flex-end;">\n      <button id="githubTokenCancel" type="button" style="padding:10px 16px;border:1px solid #bbb;background:#fff;border-radius:9px;cursor:pointer;">Annuler</button>\n      <button id="githubTokenSave" type="button" style="padding:10px 16px;border:0;background:#111;color:#fff;border-radius:9px;cursor:pointer;font-weight:600;">Enregistrer le token</button>\n    </div>\n  </div>\n</div>\n<script>document.addEventListener('DOMContentLoaded',initGitHubConfig);</script>
 </body>
 </html>
