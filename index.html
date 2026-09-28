@@ -1540,18 +1540,39 @@ function getXlsxWorker(){
       const data=ev.data||{};
       try{
         const wb=XLSX.read(data.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false});
-        let bestSheet=null, bestHeader=0, bestScore=-1;
+        let bestSheet=null, bestHeader=0, bestScore=-1, bestDataRows=-1;
+        // IMPORTANT : ne jamais utiliser sheet_to_json(...).slice(...) pour la recherche
+        // de l'en-tête : sur un fichier de 170 Mo cela convertit toute la feuille en
+        // mémoire avant le slice et peut faire croire qu'il n'y a aucune donnée.
         for(const name of wb.SheetNames){
           const ws=wb.Sheets[name];
-          // On cherche la vraie ligne d'en-tête dans les premières lignes.
-          const preview=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',range:0,blankrows:false}).slice(0,40);
-          for(let r=0;r<preview.length;r++){
-            const sc=scoreHeader(preview[r]);
-            if(sc>bestScore){ bestScore=sc; bestSheet=ws; bestHeader=r; }
+          const ref=ws['!ref'];
+          if(!ref) continue;
+          const rg=XLSX.utils.decode_range(ref);
+          const maxScan=Math.min(rg.e.r,199);
+          for(let r=rg.s.r;r<=maxScan;r++){
+            const row=[];
+            for(let c=rg.s.c;c<=rg.e.c;c++){
+              const cell=ws[XLSX.utils.encode_cell({r,c})];
+              row.push(cell ? cell.v : '');
+            }
+            const sc=scoreHeader(row);
+            const dataRows=Math.max(0,rg.e.r-r);
+            if(sc>bestScore || (sc===bestScore && dataRows>bestDataRows)){
+              bestScore=sc; bestSheet=ws; bestHeader=r; bestDataRows=dataRows;
+            }
           }
         }
-        if(!bestSheet) bestSheet=wb.Sheets[wb.SheetNames[0]];
-        const raw=XLSX.utils.sheet_to_json(bestSheet,{header:1,defval:'',range:bestHeader});
+        if(!bestSheet){
+          const first=wb.SheetNames[0];
+          bestSheet=first ? wb.Sheets[first] : null;
+          bestHeader=0; bestScore=0;
+        }
+        if(!bestSheet){
+          self.postMessage({type:'done', rows:[], headerRow:0, headerScore:0});
+          return;
+        }
+        const raw=XLSX.utils.sheet_to_json(bestSheet,{header:1,defval:'',range:bestHeader,blankrows:false});
         self.postMessage({type:'done', rows:raw, headerRow:bestHeader, headerScore:bestScore});
       }catch(err){
         self.postMessage({type:'error', message:err && err.message ? err.message : String(err)});
