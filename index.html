@@ -1575,7 +1575,7 @@ const GH_API_BASE='https://api.github.com';
 // Authentification automatique demandée pour ce dashboard.
 // IMPORTANT : un token placé dans un HTML public est visible par toute personne
 // pouvant consulter le code source. Il doit être limité au dépôt CM.
-const GH_AUTO_TOKEN='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';
+const GH_AUTO_TOKEN='REMPLACER_PAR_UN_NOUVEAU_TOKEN_GITHUB';
 function getGitHubToken(){ return GH_AUTO_TOKEN; }
 function setGitHubToken(_token){}
 function utf8ToBase64(str){
@@ -1594,6 +1594,10 @@ document.getElementById('GitHubSaveBtn')?.addEventListener('click',()=>saveCurre
 async function saveCurrentDataToGitHub({commitMessage='Update data.json depuis le dashboard'}={}){
   if(!records.length){showStatus('⚠️ Aucune donnée à enregistrer dans GitHub.',true);return false;}
   const token=getGitHubToken();
+  if(!token || !/^gh[pousr]_/.test(token)){
+    showStatus('❌ Token GitHub absent ou format non reconnu. Configurez un nouveau PAT.',true);
+    return false;
+  }
 
   const payload={meta:{...meta},records:[...records],savedAt:new Date().toLocaleString('fr-FR')};
   const json=JSON.stringify(payload);
@@ -1617,9 +1621,11 @@ async function saveCurrentDataToGitHub({commitMessage='Update data.json depuis l
     const current=await getRes.json();
     if(!current.sha)throw new Error('SHA de data.json introuvable.');
 
+    // PAT classique GitHub (ghp_...) : utiliser le schéma `token`.
+    // Le token doit disposer du scope `repo` pour écrire dans ce dépôt.
     const putHeaders={
       'Accept':'application/vnd.github+json',
-      'Authorization':'Bearer '+token,
+      'Authorization':'token '+token,
       'X-GitHub-Api-Version':'2026-03-10',
       'Content-Type':'application/json'
     };
@@ -1632,10 +1638,18 @@ async function saveCurrentDataToGitHub({commitMessage='Update data.json depuis l
     const putRes=await fetch(url,{method:'PUT',mode:'cors',headers:putHeaders,body:JSON.stringify(body)});
     const putData=await putRes.json().catch(()=>({}));
     if(!putRes.ok){
-      if(putRes.status===401) throw new Error('Token GitHub invalide ou expiré.');
-      if(putRes.status===403) throw new Error('GitHub refuse l’écriture. Le token doit avoir Contents → Read and write sur le dépôt CM.');
-      if(putRes.status===409) throw new Error('Conflit : data.json a changé entre la lecture et la sauvegarde.');
-      throw new Error(putData.message||('HTTP '+putRes.status));
+      if(putRes.status===401){
+        throw new Error('HTTP 401 — GitHub rejette le token. Le PAT a probablement été révoqué/expiré, ou il est incorrect. Créez un NOUVEAU token puis remplacez GH_AUTO_TOKEN.');
+      }
+      if(putRes.status===403){
+        const detail=putData.message||'Permission refusée';
+        throw new Error('HTTP 403 — permission GitHub refusée : '+detail+' Pour un token classique ghp_, le scope `repo` est nécessaire pour écrire dans data.json.');
+      }
+      if(putRes.status===404){
+        throw new Error('HTTP 404 — dépôt ou fichier introuvable. Vérifiez cmdashcod/CM, la branche main et data.json.');
+      }
+      if(putRes.status===409) throw new Error('HTTP 409 — conflit : data.json a changé entre la lecture et la sauvegarde. Réessayez.');
+      throw new Error((putData.message||('HTTP '+putRes.status)));
     }
     showStatus('☁️✅ Enregistré automatiquement dans serveur — '+fInt(records.length)+' lignes');
     return true;
