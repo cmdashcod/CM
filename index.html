@@ -1560,31 +1560,20 @@ document.getElementById('unlockBtn').addEventListener('click', unlockImport);
   };
 })();
 
-/* ════════════ GITHUB PAGES — LECTURE + SAUVEGARDE AUTOMATIQUE data.json ════════════
-   - Le dashboard LIT data.json au démarrage.
-   - Après Upload + association des colonnes, data.json est sauvegardé automatiquement.
-   - Aucun écran d'authentification n'est affiché.
+/* ════════════ GITHUB PAGES — LECTURE + SAUVEGARDE AUTOMATIQUE ════════════
+   Le navigateur ne contient AUCUN token GitHub.
+   Après l'association des colonnes, saveCurrentDataToGitHub() envoie
+   directement les données au Worker sécurisé.
 */
 const DATA_JSON_URL='./data.json';
-const GH_OWNER='cmdashcod';
-const GH_REPO='CM';
-const GH_BRANCH='main';
-const GH_PATH='data.json';
-const GH_API_BASE='https://api.github.com';
 
-// Authentification automatique demandée pour ce dashboard.
-// IMPORTANT : un token placé dans un HTML public est visible par toute personne
-// pouvant consulter le code source. Il doit être limité au dépôt CM.
-// IMPORTANT : aucun token GitHub n'est stocké dans ce fichier public.
-// Le token doit être fourni au runtime dans window.__GH_AUTO_TOKEN__.
-// Ne jamais publier un PAT dans index.html.
-function getGitHubToken(){
-  return (window.__GH_AUTO_TOKEN__ || '').trim();
-}
-function setGitHubToken(token){
-  // Mémoire uniquement : jamais de localStorage/sessionStorage/cookie.
-  window.__GH_AUTO_TOKEN__ = String(token || '').trim();
-}
+/*
+ * URL du Worker Cloudflare à remplacer après déploiement.
+ * Exemple :
+ * https://cmdash-github-save.<votre-compte>.workers.dev
+ */
+const SAVE_ENDPOINT='https://REMPLACER-PAR-VOTRE-WORKER.workers.dev';
+
 function utf8ToBase64(str){
   const bytes=new TextEncoder().encode(str);
   let out='';
@@ -1595,79 +1584,61 @@ function utf8ToBase64(str){
   return btoa(out);
 }
 
-// Le dashboard n'affiche aucune fenêtre d'authentification.
-// Pour une architecture réellement automatique et sécurisée sur GitHub Pages,
-// le token doit être injecté par un mécanisme serveur/backend ou par l'environnement.
-// Un token ne doit jamais être écrit dans ce HTML public.
-// Sauvegarde manuelle éventuelle : elle ne demande plus aucune authentification.
+/* Conservation de l'ancienne fonction pour compatibilité avec le dashboard.
+   Aucun token n'est stocké, lu ou demandé au navigateur. */
+function getGitHubToken(){ return null; }
+function setGitHubToken(_token){}
+
+/* Sauvegarde manuelle éventuelle : aucun écran d'authentification. */
 document.getElementById('GitHubSaveBtn')?.addEventListener('click',()=>saveCurrentDataToGitHub());
 
 async function saveCurrentDataToGitHub({commitMessage='Update data.json depuis le dashboard'}={}){
-  if(!records.length){showStatus('⚠️ Aucune donnée à enregistrer dans GitHub.',true);return false;}
-  const token=getGitHubToken();
-  if(!token || !/^gh[pousr]_/.test(token)){
-    showStatus('❌ Token GitHub absent ou format non reconnu. Configurez un nouveau PAT.',true);
+  if(!records.length){
+    showStatus('⚠️ Aucune donnée à enregistrer dans GitHub.',true);
     return false;
   }
 
-  const payload={meta:{...meta},records:[...records],savedAt:new Date().toLocaleString('fr-FR')};
+  if(!SAVE_ENDPOINT || SAVE_ENDPOINT.includes('REMPLACER-PAR-VOTRE-WORKER')){
+    showStatus('❌ Endpoint de sauvegarde non configuré. Renseignez SAVE_ENDPOINT dans index.html.',true);
+    return false;
+  }
+
+  const payload={
+    meta:{...meta},
+    records:[...records],
+    savedAt:new Date().toLocaleString('fr-FR')
+  };
+
   const json=JSON.stringify(payload);
   const sizeMB=(new TextEncoder().encode(json).length/1048576);
-  if(sizeMB>90){showStatus('❌ data.json est trop volumineux ('+sizeMB.toFixed(1)+' Mo).',true);return false;}
+  if(sizeMB>90){
+    showStatus('❌ data.json est trop volumineux ('+sizeMB.toFixed(1)+' Mo).',true);
+    return false;
+  }
 
-  showStatus('☁️ Enregistrement automatique de '+fInt(records.length)+' lignes dans GitHub…');
+  showStatus('☁️ Enregistrement automatique de '+fInt(records.length)+' lignes…');
+
   try{
-    const url=`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_PATH}`;
-    const getHeaders={
-      'Accept':'application/vnd.github+json',
-      'X-GitHub-Api-Version':'2026-03-10'
-    };
-    const getRes=await fetch(url+'?ref='+encodeURIComponent(GH_BRANCH)+'&_='+Date.now(),{
-      method:'GET',mode:'cors',cache:'no-store',headers:getHeaders
+    const res=await fetch(SAVE_ENDPOINT,{
+      method:'POST',
+      mode:'cors',
+      headers:{
+        'Content-Type':'application/json'
+      },
+      body:json
     });
-    if(!getRes.ok){
-      if(getRes.status===404) throw new Error('data.json introuvable dans cmdashcod/CM sur la branche main.');
-      throw new Error('Lecture data.json : HTTP '+getRes.status);
-    }
-    const current=await getRes.json();
-    if(!current.sha)throw new Error('SHA de data.json introuvable.');
 
-    // PAT classique GitHub (ghp_...) : utiliser le schéma `token`.
-    // Le token doit disposer du scope `repo` pour écrire dans ce dépôt.
-    const putHeaders={
-      'Accept':'application/vnd.github+json',
-      'Authorization':'Bearer '+token,
-      'X-GitHub-Api-Version':'2026-03-10',
-      'Content-Type':'application/json'
-    };
-    const body={
-      message:commitMessage,
-      content:utf8ToBase64(json),
-      sha:current.sha,
-      branch:GH_BRANCH
-    };
-    const putRes=await fetch(url,{method:'PUT',mode:'cors',headers:putHeaders,body:JSON.stringify(body)});
-    const putData=await putRes.json().catch(()=>({}));
-    if(!putRes.ok){
-      if(putRes.status===401){
-        throw new Error('HTTP 401 — GitHub rejette le token. Vérifiez qu’il est actif, qu’il n’est pas expiré/révoqué et qu’il autorise le dépôt CM.');
-      }
-      if(putRes.status===403){
-        const detail=putData.message||'Permission refusée';
-        throw new Error('HTTP 403 — permission GitHub refusée : '+detail+' Pour un token fine-grained, activez Contents: Read and write sur le dépôt CM. Pour un PAT classique, le scope repo est nécessaire.');
-      }
-      if(putRes.status===404){
-        throw new Error('HTTP 404 — dépôt ou fichier introuvable. Vérifiez cmdashcod/CM, la branche main et data.json.');
-      }
-      if(putRes.status===409) throw new Error('HTTP 409 — conflit : data.json a changé entre la lecture et la sauvegarde. Réessayez.');
-      throw new Error((putData.message||('HTTP '+putRes.status)));
+    const result=await res.json().catch(()=>({}));
+
+    if(!res.ok){
+      throw new Error(result.message || ('HTTP '+res.status));
     }
-    showStatus('☁️✅ Enregistré automatiquement dans serveur — '+fInt(records.length)+' lignes');
+
+    showStatus('☁️✅ Enregistré automatiquement dans GitHub — '+fInt(records.length)+' lignes');
     return true;
   }catch(err){
-    console.error(err);
-    const msg=(err?.message||String(err));
-    showStatus('❌ Sauvegarde GitHub impossible : '+msg,true);
+    console.error('Sauvegarde automatique:',err);
+    showStatus('❌ Sauvegarde automatique impossible : '+(err?.message||String(err)),true);
     return false;
   }
 }
