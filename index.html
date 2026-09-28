@@ -1503,6 +1503,47 @@ async function validatePin(){
   }
 }
 
+let _xlsxWorker=null;
+
+function getXlsxWorker(){
+  if(_xlsxWorker) return _xlsxWorker;
+  const workerCode = `
+    self.importScripts('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
+    self.onmessage = function(ev){
+      const data=ev.data||{};
+      try{
+        const wb=XLSX.read(data.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        self.postMessage({type:'done', rows:raw});
+      }catch(err){
+        self.postMessage({type:'error', message:err && err.message ? err.message : String(err)});
+      }
+    };
+  `;
+  const blob=new Blob([workerCode],{type:'application/javascript'});
+  _xlsxWorker=new Worker(URL.createObjectURL(blob));
+  return _xlsxWorker;
+}
+
+function parseOneFileInWorker(file, buffer){
+  return new Promise((resolve,reject)=>{
+    const worker=getXlsxWorker();
+    const handler=ev=>{
+      if(ev.data?.type==='done'){
+        worker.removeEventListener('message',handler);
+        resolve(ev.data.rows||[]);
+      }else if(ev.data?.type==='error'){
+        worker.removeEventListener('message',handler);
+        reject(new Error(ev.data.message||'Erreur pendant l’analyse du fichier.'));
+      }
+    };
+    worker.addEventListener('message',handler);
+    try{ worker.postMessage({buffer},[buffer]); }
+    catch(err){ worker.removeEventListener('message',handler); reject(err); }
+  });
+}
+
 async function parseFiles(files){
   if(!files||!files.length){hideLoadProgress();return;}
   const allowed=/\.(xlsx|xls|csv)$/i;
@@ -1512,47 +1553,53 @@ async function parseFiles(files){
     let baseHdrs=null;
     for(let fi=0;fi<files.length;fi++){
       const file=files[fi];
-      const startPct=5+(fi/files.length)*75;
-      setLoadProgress(startPct,`Lecture ${fi+1}/${files.length} : ${file.name}`,'Chargement des fichiers');
+      const fileBase=5+(fi/files.length)*70;
+      setLoadProgress(fileBase,`Lecture ${fi+1}/${files.length} : ${file.name}`,'Chargement des fichiers');
       await nextFrame();
+
       const buffer=await new Promise((resolve,reject)=>{
         const r=new FileReader();
         r.onprogress=e=>{
           if(e.lengthComputable){
             const local=e.loaded/e.total;
-            const p=startPct+local*(70/files.length);
+            const p=fileBase+local*(25/files.length);
             setLoadProgress(p,`Lecture ${fi+1}/${files.length} : ${(e.loaded/1024/1024).toFixed(1)} / ${(e.total/1024/1024).toFixed(1)} Mo`,'Chargement des fichiers');
           }
         };
-        r.onload=()=>resolve(r.result); r.onerror=()=>reject(new Error('Impossible de lire '+file.name));
+        r.onload=()=>resolve(r.result);
+        r.onerror=()=>reject(new Error('Impossible de lire '+file.name));
         r.readAsArrayBuffer(file);
       });
+
+      setLoadProgress(fileBase+28/files.length,`Analyse de ${file.name} dans un processus séparé…`,'Analyse du fichier');
       await nextFrame();
-      const wb=XLSX.read(buffer,{type:'array',cellDates:true});
-      const ws=wb.Sheets[wb.SheetNames[0]];
-      const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-      if(!raw||raw.length<2)continue;
-      const hdrs=raw[0].map(String);
+      const raw=await parseOneFileInWorker(file,buffer);
+      await nextFrame();
+
+      if(!raw||raw.length<2) continue;
+      const hdrs=raw[0].map(v=>String(v??''));
       if(!baseHdrs){
         baseHdrs=hdrs;
       }else{
-        const norm=h=>String(h).toLowerCase().trim().replace(/[\s\-_\/]/g,'');
+        const norm=h=>String(h).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[\s\-_\/]+/g,'');
         const same=baseHdrs.length===hdrs.length && baseHdrs.every((h,i)=>norm(h)===norm(hdrs[i]));
         if(!same) throw new Error(`La structure de « ${file.name} » est différente du premier fichier.`);
       }
       allRows.push(...raw.slice(1));
-      setLoadProgress(5+((fi+1)/files.length)*75,`${fInt(allRows.length)} lignes chargées…`,'Préparation des données');
+      setLoadProgress(8+((fi+1)/files.length)*68,`${fInt(allRows.length)} lignes chargées…`,'Préparation des données');
       await nextFrame();
     }
     if(!baseHdrs||!allRows.length){hideLoadProgress();showStatus('❌ Aucun fichier contenant des lignes de données.',true);return;}
     _rawHdrs=baseHdrs; _rawRows=allRows;
-    setLoadProgress(84,`${fInt(_rawRows.length)} lignes détectées. Préparation de l’association…`,'Préparation');
+    setLoadProgress(82,`${fInt(_rawRows.length)} lignes détectées. Association automatique des colonnes…`,'Préparation');
     await nextFrame();
     buildColMap(_rawHdrs);
-    setLoadProgress(100,`${fInt(_rawRows.length)} lignes prêtes. Vous pouvez associer les colonnes.`,'Fichiers prêts');
-    setTimeout(hideLoadProgress,180);
+    setLoadProgress(100,`${fInt(_rawRows.length)} lignes prêtes. Les colonnes ont été associées automatiquement lorsque reconnues.`,'Fichiers prêts');
+    setTimeout(hideLoadProgress,250);
   }catch(err){
-    hideLoadProgress();showStatus('❌ Erreur : '+err.message,true);console.error(err);
+    hideLoadProgress();
+    showStatus('❌ Erreur : '+(err?.message||err),true);
+    console.error(err);
   }
 }
 
@@ -1566,72 +1613,47 @@ function normalizeHeader(v){
 }
 
 function autoMap(hdrs){
-  // Association automatique renforcée : on utilise les anciens noms sauvegardés,
-  // les alias métier, le libellé du champ et les mots du nom de colonne.
-  // L'affectation est faite globalement afin qu'une colonne générique (ex. "Statut")
-  // ne soit pas prise avant une colonne plus précise (ex. "Statut du paiement").
-  const norm = v => String(v ?? '')
+  // Association automatique basée sur la logique d'origine du dashboard.
+  // On conserve aussi les associations mémorisées pour les fichiers réimportés.
+  const norm=h=>String(h ?? '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .toLowerCase()
-    .replace(/œ/g,'oe').replace(/æ/g,'ae')
-    .replace(/[^a-z0-9]+/g,'')
-    .trim();
-  const tokens = v => (String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .toLowerCase().replace(/œ/g,'oe').replace(/æ/g,'ae')
-    .match(/[a-z0-9]{2,}/g) || []);
-
+    .toLowerCase().replace(/[\s\-_\/]+/g,'').trim();
+  const normHdrs=hdrs.map(norm);
   let saved={};
   try{ saved=JSON.parse(localStorage.getItem('gpl_column_mapping')||'{}')||{}; }catch(e){ saved={}; }
-
-  const columns=hdrs.map((h,i)=>({i, raw:String(h), n:norm(h), tok:tokens(h)}));
-  const candidates=[];
+  const m={};
+  const used=new Set();
 
   FIELD_DEFS.forEach(f=>{
-    const aliases=[
-      f.key, f.label,
-      ...(Array.isArray(f.hints)?f.hints:[]),
-      saved[f.key]||''
-    ].filter(Boolean);
+    const hints=[];
+    if(saved[f.key]) hints.push('='+saved[f.key]);
+    hints.push(...f.hints);
+    hints.push(f.label);
 
-    columns.forEach(col=>{
-      let best=0;
-      for(const aliasRaw of aliases){
-        const alias=String(aliasRaw).replace(/^=/,'');
-        const a=norm(alias);
-        if(!a) continue;
-        const at=tokens(alias);
-        let score=0;
-        if(col.n===a) score=Math.max(score,12000+a.length*10);
-        else if(col.n.includes(a)) score=Math.max(score,8500+a.length*8);
-        else if(a.includes(col.n) && col.n.length>=3) score=Math.max(score,6500+col.n.length*8);
-        const common=at.filter(t=>col.tok.includes(t));
-        if(common.length){
-          const covered=common.reduce((n,t)=>n+t.length,0);
-          score=Math.max(score,common.length*900+covered*35);
-        }
-        // Le libellé exact du champ a une priorité raisonnable.
-        if(norm(f.label)===a && col.n.includes(a)) score+=1000;
-        if(score>best) best=score;
+    let found=-1;
+    for(const hint of hints){
+      const exact=String(hint).startsWith('=');
+      const raw=exact ? String(hint).slice(1) : String(hint);
+      const nh=norm(raw);
+      if(!nh) continue;
+      // Correspondance exacte prioritaire.
+      for(let i=0;i<normHdrs.length;i++){
+        if(used.has(i)) continue;
+        if(normHdrs[i]===nh){ found=i; break; }
       }
-      // Bonus pour les champs obligatoires et pénalité pour les colonnes trop génériques.
-      if(f.req) best+=100;
-      if(['statut','status','verse','montant','colis','frais','livreur','partenaire'].includes(col.n)) best-=700;
-      if(best>0) candidates.push({field:f.key, idx:col.i, score:best});
-    });
+      if(found>=0) break;
+      // Puis correspondance partielle comme dans la version d'origine.
+      if(!exact){
+        for(let i=0;i<normHdrs.length;i++){
+          if(used.has(i)) continue;
+          if(normHdrs[i].includes(nh)){ found=i; break; }
+        }
+      }
+      if(found>=0) break;
+    }
+    if(found>=0){ m[f.key]=found; used.add(found); }
   });
-
-  // Affectation globale : les correspondances les plus sûres sont attribuées en premier.
-  candidates.sort((a,b)=>b.score-a.score);
-  const result={}, used=new Set();
-  for(const c of candidates){
-    if(result[c.field]!==undefined || used.has(c.idx)) continue;
-    // Seuil volontairement bas pour les champs optionnels : les champs obligatoires
-    // restent très favorisés par leur score.
-    if(c.score<500) continue;
-    result[c.field]=c.idx;
-    used.add(c.idx);
-  }
-  return result;
+  return m;
 }
 
 function buildColMap(hdrs){
