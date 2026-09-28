@@ -1556,25 +1556,60 @@ async function parseFiles(files){
   }
 }
 
+function normalizeHeader(v){
+  return String(v??'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase()
+    .replace(/œ/g,'oe').replace(/æ/g,'ae')
+    .replace(/[^a-z0-9]+/g,'')
+    .trim();
+}
+
 function autoMap(hdrs){
-  const norm=h=>String(h).toLowerCase().replace(/[\s\-_\/]/g,'');
-  const normHdrs=hdrs.map(norm);
-  const m={};
+  const normHdrs=hdrs.map(normalizeHeader);
+  let saved={};
+  try{ saved=JSON.parse(localStorage.getItem('gpl_column_mapping')||'{}')||{}; }catch(e){ saved={}; }
+  const result={};
+  const used=new Set();
+
+  // 1) Réutiliser en priorité les associations validées lors d'un import précédent.
   FIELD_DEFS.forEach(f=>{
-    let found='';
-    // On essaie chaque indice (du plus spécifique au plus générique) sur TOUS les
-    // en-têtes avant de passer à l'indice suivant, pour éviter qu'un indice générique
-    // (ex: "verse") ne capture par erreur une colonne destinée à un autre champ
-    // (ex: "Versement Livreur") simplement parce qu'elle apparaît plus tôt dans le fichier.
-    for(const hint of f.hints){
-      const exact=hint.startsWith('=');
-      const nh=norm(exact?hint.slice(1):hint);
-      const idx=normHdrs.findIndex(h=>exact?h===nh:h.includes(nh));
-      if(idx>=0){ found=hdrs[idx]; break; }
-    }
-    m[f.key]=found;
+    const wanted=normalizeHeader(saved[f.key]||'');
+    if(!wanted) return;
+    const idx=normHdrs.findIndex((h,i)=>!used.has(i) && (h===wanted || h.includes(wanted) || wanted.includes(h)));
+    if(idx>=0){ result[f.key]=idx; used.add(idx); }
   });
-  return m;
+
+  // 2) Recherche automatique robuste : accents, espaces, tirets, slashs et variantes FR/EN.
+  FIELD_DEFS.forEach(f=>{
+    if(result[f.key]!==undefined) return;
+    let best=-1, bestScore=0;
+    for(let i=0;i<hdrs.length;i++){
+      if(used.has(i)) continue;
+      const h=normHdrs[i];
+      if(!h) continue;
+      for(const rawHint of f.hints){
+        const exact=String(rawHint).startsWith('=');
+        const hint=normalizeHeader(exact?String(rawHint).slice(1):rawHint);
+        if(!hint) continue;
+        let score=0;
+        if(h===hint) score=1000+hint.length;
+        else if(h.includes(hint)) score=700+hint.length;
+        else if(hint.includes(h)) score=450+h.length;
+        else {
+          const ht=hint.match(/[a-z0-9]{3,}/g)||[];
+          const toks=h.match(/[a-z0-9]{3,}/g)||[];
+          const common=ht.filter(t=>toks.includes(t));
+          if(common.length) score=common.length*100+common.reduce((a,t)=>a+t.length,0);
+        }
+        // Les indices très génériques doivent être moins prioritaires.
+        if(['statut','status','verse','montant','colis','frais','livreur','partenaire'].includes(hint)) score-=120;
+        if(score>bestScore){bestScore=score;best=i;}
+      }
+    }
+    if(best>=0 && bestScore>=120){ result[f.key]=best; used.add(best); }
+  });
+  return result;
 }
 
 function buildColMap(hdrs){
@@ -1582,8 +1617,9 @@ function buildColMap(hdrs){
   const auto=autoMap(hdrs);
   FIELD_DEFS.forEach(f=>{
     const row=document.createElement('div'); row.className='map-row';
-    const opts=hdrs.map(h=>`<option value="${esc(h)}"${auto[f.key]===h?' selected':''}>${esc(h)}</option>`).join('');
-    row.innerHTML=`<label>${f.req?'⚡ ':''}${f.label}${f.req?' *':''}</label><select id="map_${f.key}"><option value="">— Non associé —</option>${opts}</select>`;
+    const selected=auto[f.key];
+    const opts=hdrs.map((h,i)=>`<option value="${i}"${selected===i?' selected':''}>${esc(h)}</option>`).join('');
+    row.innerHTML=`<label>${f.req?'⚡ ':''}${f.label}${f.req?' *':''}</label><select id="map_${f.key}"><option value="-1"${selected===undefined?' selected':''}>— Non associé —</option>${opts}</select>`;
     grid.appendChild(row);
   });
   document.getElementById('mapModal').classList.add('show');
@@ -1594,7 +1630,16 @@ document.getElementById('mapCancel').addEventListener('click',()=>document.getEl
 
 async function applyMapping(){
   const idx={};
-  FIELD_DEFS.forEach(f=>{ const v=document.getElementById('map_'+f.key)?.value||''; if(v)idx[f.key]=_rawHdrs.indexOf(v); });
+  const savedMapping={};
+  FIELD_DEFS.forEach(f=>{
+    const v=document.getElementById('map_'+f.key)?.value ?? '-1';
+    const n=Number(v);
+    if(Number.isInteger(n) && n>=0 && n<_rawHdrs.length){
+      idx[f.key]=n;
+      savedMapping[f.key]=_rawHdrs[n];
+    }
+  });
+  try{ localStorage.setItem('gpl_column_mapping',JSON.stringify(savedMapping)); }catch(e){}
   const missing=FIELD_DEFS.filter(f=>f.req&&(idx[f.key]===undefined||idx[f.key]<0)).map(f=>f.label);
   if(missing.length){showStatus('❌ Champs requis manquants : '+missing.join(', '),true);return;}
 
