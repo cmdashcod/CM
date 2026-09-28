@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link rel="preconnect" href="https://cdn.jsdelivr.net"/>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.20.3/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
   <style>
     /* ── LIGHT MODE (défaut) ── */
@@ -1508,7 +1508,7 @@ let _xlsxWorker=null;
 function getXlsxWorker(){
   if(_xlsxWorker) return _xlsxWorker;
   const workerCode = `
-    self.importScripts('https://cdn.jsdelivr.net/npm/xlsx@0.20.3/dist/xlsx.full.min.js');
+    self.importScripts('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
     const HINTS = [
       'date','datefacture','dateversement','semaine','week','montant','crbt','frais',
       'montantenattente','statutdupaiement','etatcod','segment','tranchesderetard',
@@ -1616,67 +1616,43 @@ function getXlsxWorker(){
           if(processing) throw new Error('Un traitement est déjà en cours.');
           processing=true;
           const chunkSize=30000;
-          const val=(row,idx)=>idx>=0 && idx<row.length ? row[idx] : '';
           try{
             let globalDone=0;
+            // Le parsing complet est différé jusqu'après l'association des colonnes.
+            // Le dashboard peut donc afficher l'association rapidement, sans attendre
+            // l'analyse de plusieurs centaines de milliers de lignes.
             let total=0;
-            const jobs=[];
-
-            // IMPORTANT : le classeur est parsé une seule fois par fichier dans le Worker,
-            // mais les données utiles sont immédiatement extraites par blocs de 30 000.
-            // On ne renvoie JAMAIS les 40 colonnes brutes au thread principal.
+            const full=[];
             for(let fi=0;fi<files.length;fi++){
               const f=files[fi];
-              let wb=XLSX.read(f.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false,cellStyles:false,cellHTML:false,cellFormula:false,dense:true,WTF:false});
+              const wb=XLSX.read(f.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false,dense:true});
               const ws=wb.Sheets[f.sheetName];
               if(!ws) throw new Error('Feuille introuvable : '+f.sheetName);
               const ref=ws['!ref'] || ws['!fullref'];
               let rg;
-              if(ref) rg=XLSX.utils.decode_range(ref);
-              else if(Array.isArray(ws)) rg={s:{r:f.headerRow,c:f.startCol},e:{r:ws.length-1,c:f.endCol}};
-              else throw new Error('La feuille '+f.sheetName+' ne fournit pas de plage de données.');
-
+              if(ref){
+                rg=XLSX.utils.decode_range(ref);
+              }else if(Array.isArray(ws)){
+                rg={s:{r:0,c:f.startCol},e:{r:ws.length-1,c:f.endCol}};
+              }else{
+                throw new Error('La feuille '+f.sheetName+' ne fournit pas de plage de données.');
+              }
               const lastRow=rg.e.r;
               const rowCount=Math.max(0,lastRow-f.headerRow);
-              total+=rowCount;
-              jobs.push({f,ws,lastRow,rowCount});
-
-              // Le buffer original n'est plus nécessaire après le parse : libérer cette référence
-              // réduit fortement le pic mémoire sur les fichiers de 100+ Mo.
-              f.buffer=null;
-              wb=null;
-              self.postMessage({type:'progress',done:globalDone,total,fileIndex:fi,fileName:f.name,message:'Feuille '+f.sheetName+' : '+rowCount.toLocaleString()+' lignes détectées'});
+              full.push({f,ws,rg,lastRow,rowCount});
+              total += rowCount;
+              self.postMessage({type:'progress',done:0,total,fileIndex:fi,fileName:f.name,message:'Classeur analysé : '+rowCount.toLocaleString()+' lignes détectées'});
             }
-
-            // Deuxième passage : extraction et transformation par blocs.
-            for(let fi=0;fi<jobs.length;fi++){
-              const x=jobs[fi], f=x.f;
-              // Les indices des champs sont préparés à partir des en-têtes au moment de l'association.
-              const colIndex={};
-              // Ces indices sont envoyés avec la commande process (voir processMapping ci-dessous).
-              const map=data.map||{};
-              for(const k of Object.keys(map)) colIndex[k]=Number(map[k]);
-
+            for(let fi=0;fi<full.length;fi++){
+              const x=full[fi], f=x.f;
               for(let start=f.headerRow+1; start<=x.lastRow; start+=chunkSize){
                 const end=Math.min(x.lastRow,start+chunkSize-1);
-                const rows=XLSX.utils.sheet_to_json(x.ws,{header:1,defval:'',blankrows:false,raw:true,range:{s:{r:start,c:f.startCol},e:{r:end,c:f.endCol}}});
-                const out=new Array(rows.length);
-                for(let i=0;i<rows.length;i++){
-                  const r=rows[i];
-                  out[i]={
-                    d:val(r,colIndex.d), w:val(r,colIndex.w), crbt:val(r,colIndex.crbt), fr:val(r,colIndex.fr), p:val(r,colIndex.p),
-                    sp:val(r,colIndex.sp), ec:val(r,colIndex.ec), s:val(r,colIndex.s), t:val(r,colIndex.t), c:val(r,colIndex.c),
-                    n:val(r,colIndex.n), lf:val(r,colIndex.lf), lr:val(r,colIndex.lr), v:val(r,colIndex.v), ca:val(r,colIndex.ca),
-                    co:val(r,colIndex.co), a1:val(r,colIndex.a1), a2:val(r,colIndex.a2), a3:val(r,colIndex.a3), a4:val(r,colIndex.a4),
-                    a5:val(r,colIndex.a5), sc:val(r,colIndex.sc), fv:val(r,colIndex.fv)
-                  };
+                const rows=XLSX.utils.sheet_to_json(x.ws,{header:1,defval:'',blankrows:false,range:{s:{r:start,c:f.startCol},e:{r:end,c:f.endCol}}});
+                if(rows.length){
+                  globalDone += rows.length;
+                  self.postMessage({type:'chunk',fileIndex:fi,fileName:f.name,rows,done:globalDone,total});
                 }
-                globalDone+=out.length;
-                self.postMessage({type:'chunk',fileIndex:fi,fileName:f.name,records:out,done:globalDone,total});
-                // Laisser le Worker respirer entre deux blocs.
-                await new Promise(r=>setTimeout(r,0));
               }
-              jobs[fi].ws=null;
             }
             self.postMessage({type:'processDone',total});
           }finally{ processing=false; }
@@ -1878,15 +1854,15 @@ async function applyMapping(){
       if(d.type==='progress'){
         setLoadProgress(8, d.message||'Analyse du classeur…','Importation des données');
       }else if(d.type==='chunk'){
-        const rows=d.records||[];
+        const rows=d.rows||[];
         for(let i=0;i<rows.length;i++){
           const r=rows[i];
           newR.push({
-            d:toDate(r.d), w:String(r.w??''), crbt:sf(r.crbt), fr:sf(r.fr), p:sf(r.p),
-            sp:String(r.sp??''), ec:String(r.ec??''), s:String(r.s??''), t:String(r.t??''),
-            c:String(r.c??''), n:String(r.n??''), lf:String(r.lf??''), lr:String(r.lr??''), v:String(r.v??''), ca:String(r.ca??''), co:String(r.co??''),
-            a1:sf(r.a1), a2:sf(r.a2), a3:sf(r.a3), a4:sf(r.a4), a5:sf(r.a5),
-            sc:String(r.sc??''), fv:String(r.fv??'')
+            d:toDate(cv(r,'d')), w:String(cv(r,'w')), crbt:sf(cv(r,'crbt')), fr:sf(cv(r,'fr')), p:sf(cv(r,'p')),
+            sp:String(cv(r,'sp')), ec:String(cv(r,'ec')), s:String(cv(r,'s')), t:String(cv(r,'t')),
+            c:String(cv(r,'c')), n:String(cv(r,'n')), lf:String(cv(r,'lf')), lr:String(cv(r,'lr')), v:String(cv(r,'v')), ca:String(cv(r,'ca')), co:String(cv(r,'co')),
+            a1:sf(cv(r,'a1')), a2:sf(cv(r,'a2')), a3:sf(cv(r,'a3')), a4:sf(cv(r,'a4')), a5:sf(cv(r,'a5')),
+            sc:String(cv(r,'sc')), fv:String(cv(r,'fv'))
           });
         }
         processed=d.done||newR.length;
@@ -1899,7 +1875,7 @@ async function applyMapping(){
       }
     };
     worker.addEventListener('message',handler);
-    try{ worker.postMessage({type:'process',map:idx}); }
+    try{ worker.postMessage({type:'process'}); }
     catch(err){ worker.removeEventListener('message',handler); reject(err); }
   });
 
