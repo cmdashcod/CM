@@ -1542,8 +1542,11 @@ function getXlsxWorker(){
       const data=ev.data||{};
       try{
         if(data.type==='prepare'){
-          const wb=XLSX.read(data.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false,dense:true});
-          let best=null,bestHeader=0,bestScore=-1,bestDataRows=-1,bestName='';
+          // IMPORTANT : ne pas analyser les 757k lignes ici. On ne lit qu'un petit
+          // échantillon pour trouver la feuille et l'en-tête. Le classeur complet
+          // sera analysé uniquement après que l'utilisateur a validé l'association.
+          const wb=XLSX.read(data.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false,dense:true,sheetRows:200});
+          let best=null,bestHeader=0,bestScore=-1,bestName='';
           for(const name of wb.SheetNames){
             const ws=wb.Sheets[name];
             const ref=ws && (ws['!ref'] || ws['!fullref']);
@@ -1557,46 +1560,33 @@ function getXlsxWorker(){
                 row.push(cell ? cell.v : '');
               }
               const sc=scoreHeader(row);
-              const dataRows=Math.max(0,rg.e.r-r);
-              if(sc>bestScore || (sc===bestScore && dataRows>bestDataRows)){
-                best={ws,rg}; bestHeader=r; bestScore=sc; bestDataRows=dataRows; bestName=name;
-              }
+              if(sc>bestScore){ best={rg}; bestHeader=r; bestScore=sc; bestName=name; }
             }
           }
           if(!best){
-            // Certains gros classeurs peuvent exposer la dimension sous !fullref
-            // ou ne pas exposer !ref immédiatement. Dernier secours : inspecter les
-            // propriétés de feuille disponibles et utiliser la première feuille non vide.
-            for(const name of wb.SheetNames){
-              const ws=wb.Sheets[name];
-              if(!ws) continue;
-              const ref=ws['!ref'] || ws['!fullref'];
-              if(ref){
-                const rg=XLSX.utils.decode_range(ref);
-                if(rg.e.r>=rg.s.r && rg.e.c>=rg.s.c){ best={ws,rg}; bestHeader=rg.s.r; bestScore=0; bestDataRows=Math.max(0,rg.e.r-rg.s.r); bestName=name; break; }
-              }
-            }
-          }
-          if(!best){
-            self.postMessage({type:'prepared',ok:false,message:'Impossible de déterminer la dimension de la feuille '+data.name+'. Le classeur a été ouvert mais aucune plage de cellules exploitable n'a été fournie par le moteur Excel.'});
+            self.postMessage({type:'prepared',ok:false,message:'Impossible de lire les premières lignes de '+data.name+'. Le fichier Excel ne contient pas de feuille exploitable.'});
             return;
           }
-          const headerRange={s:{r:bestHeader,c:best.rg.s.c},e:{r:bestHeader,c:best.rg.e.c}};
+          const ws=wb.Sheets[bestName];
+          const rg=best.rg;
           const headers=[];
-          for(let c=best.rg.s.c;c<=best.rg.e.c;c++){
-            const cell=best.ws[XLSX.utils.encode_cell({r:bestHeader,c})];
+          for(let c=rg.s.c;c<=rg.e.c;c++){
+            const cell=ws[XLSX.utils.encode_cell({r:bestHeader,c})];
             headers.push(cell ? String(cell.v ?? '') : '');
           }
-          if(!headers.length){
+          if(!headers.some(h=>String(h).trim())){
             self.postMessage({type:'prepared',ok:false,message:'Aucun en-tête détecté dans '+data.name});
             return;
           }
+          // On conserve le buffer dans le Worker. Il ne retourne PAS à la page.
+          // Cela évite le transfert massif des centaines de milliers de cellules.
           const state={
-            name:data.name, ws:best.ws, startCol:best.rg.s.c, endCol:best.rg.e.c,
-            headerRow:bestHeader, lastRow:best.rg.e.r, rowCount:Math.max(0,best.rg.e.r-bestHeader), headers
+            name:data.name, buffer:data.buffer, sheetName:bestName,
+            startCol:rg.s.c, endCol:rg.e.c, headerRow:bestHeader,
+            headers
           };
           const id=files.push(state)-1;
-          self.postMessage({type:'prepared',ok:true,id,headers,rowCount:state.rowCount,sheet:bestName,headerRow:bestHeader,headerScore:bestScore});
+          self.postMessage({type:'prepared',ok:true,id,headers,rowCount:0,sheet:bestName,headerRow:bestHeader,headerScore:bestScore});
           return;
         }
         if(data.type==='process'){
@@ -1605,12 +1595,30 @@ function getXlsxWorker(){
           const chunkSize=30000;
           try{
             let globalDone=0;
-            const total=files.reduce((n,f)=>n+f.rowCount,0);
+            // Le parsing complet est différé jusqu'après l'association des colonnes.
+            // Le dashboard peut donc afficher l'association rapidement, sans attendre
+            // l'analyse de plusieurs centaines de milliers de lignes.
+            let total=0;
+            const full=[];
             for(let fi=0;fi<files.length;fi++){
               const f=files[fi];
-              for(let start=f.headerRow+1; start<=f.lastRow; start+=chunkSize){
-                const end=Math.min(f.lastRow,start+chunkSize-1);
-                const rows=XLSX.utils.sheet_to_json(f.ws,{header:1,defval:'',blankrows:false,range:{s:{r:start,c:f.startCol},e:{r:end,c:f.endCol}}});
+              const wb=XLSX.read(f.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false,dense:true});
+              const ws=wb.Sheets[f.sheetName];
+              if(!ws) throw new Error('Feuille introuvable : '+f.sheetName);
+              const ref=ws['!ref'] || ws['!fullref'];
+              if(!ref) throw new Error('La feuille '+f.sheetName+' ne fournit pas de plage de données.');
+              const rg=XLSX.utils.decode_range(ref);
+              const lastRow=rg.e.r;
+              const rowCount=Math.max(0,lastRow-f.headerRow);
+              full.push({f,ws,rg,lastRow,rowCount});
+              total += rowCount;
+              self.postMessage({type:'progress',done:0,total,fileIndex:fi,fileName:f.name,message:'Classeur analysé : '+rowCount.toLocaleString()+' lignes détectées'});
+            }
+            for(let fi=0;fi<full.length;fi++){
+              const x=full[fi], f=x.f;
+              for(let start=f.headerRow+1; start<=x.lastRow; start+=chunkSize){
+                const end=Math.min(x.lastRow,start+chunkSize-1);
+                const rows=XLSX.utils.sheet_to_json(x.ws,{header:1,defval:'',blankrows:false,range:{s:{r:start,c:f.startCol},e:{r:end,c:f.endCol}}});
                 if(rows.length){
                   globalDone += rows.length;
                   self.postMessage({type:'chunk',fileIndex:fi,fileName:f.name,rows,done:globalDone,total});
@@ -1683,7 +1691,7 @@ async function parseFiles(files){
       setLoadProgress(fileBase+28/files.length,`Analyse de ${file.name} dans un processus séparé…`,'Analyse du fichier');
       await nextFrame();
       const info=await prepareOneFileInWorker(file,buffer);
-      prepared.push(info); totalRows+=info.rowCount;
+      prepared.push(info); totalRows+=Number(info.rowCount||0);
       if(!baseHdrs) baseHdrs=info.headers;
       else {
         const norm=h=>String(h).normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().trim().replace(/[\s\-_\/]+/g,'');
@@ -1693,15 +1701,15 @@ async function parseFiles(files){
       setLoadProgress(fileBase+50/files.length,`${fInt(totalRows)} lignes détectées dans ${fi+1}/${files.length} fichier(s)…`,'Préparation des données');
       await nextFrame();
     }
-    if(!baseHdrs||!totalRows){hideLoadProgress();showStatus('❌ Aucun fichier contenant des lignes de données.',true);return;}
+    if(!baseHdrs||!prepared.length){hideLoadProgress();showStatus('❌ Aucun fichier exploitable.',true);return;}
     _rawHdrs=baseHdrs; _rawRows=[];
-    setLoadProgress(68,`${fInt(totalRows)} lignes détectées. Association automatique des colonnes…`,'Préparation');
+    setLoadProgress(68,`Fichier analysé. Association automatique des colonnes…`,'Préparation');
     await nextFrame();
     buildColMap(_rawHdrs);
     // Les données restent dans le Worker. On ne transfère surtout pas les 757k lignes d'un coup.
     window.__workerTotalRows=totalRows;
     window.__workerPreparedFiles=prepared;
-    setLoadProgress(100,`${fInt(totalRows)} lignes prêtes. Les colonnes ont été associées automatiquement lorsque reconnues.`,'Fichiers prêts');
+    setLoadProgress(100,`Colonnes détectées. Choisissez/validez l'association pour lancer le traitement complet.`,'Fichiers prêts');
     setTimeout(hideLoadProgress,250);
   }catch(err){
     hideLoadProgress();
@@ -1793,7 +1801,7 @@ async function applyMapping(){
 
   document.getElementById('mapModal').classList.remove('show');
   const total=Number(window.__workerTotalRows||0);
-  setLoadProgress(2,`Traitement de ${fInt(total)} lignes par blocs de 30 000…`,'Importation des données');
+  setLoadProgress(2,`Ouverture du classeur et traitement par blocs de 30 000…`,'Importation des données');
   await nextFrame();
 
   const cv=(row,k)=>idx[k]!==undefined&&idx[k]>=0?row[idx[k]]??'':'';
@@ -1814,7 +1822,9 @@ async function applyMapping(){
   await new Promise((resolve,reject)=>{
     const handler=ev=>{
       const d=ev.data||{};
-      if(d.type==='chunk'){
+      if(d.type==='progress'){
+        setLoadProgress(8, d.message||'Analyse du classeur…','Importation des données');
+      }else if(d.type==='chunk'){
         const rows=d.rows||[];
         for(let i=0;i<rows.length;i++){
           const r=rows[i];
@@ -1827,7 +1837,8 @@ async function applyMapping(){
           });
         }
         processed=d.done||newR.length;
-        setLoadProgress(5+(processed/Math.max(1,total))*55,`Traitement : ${fInt(processed)} / ${fInt(total)} lignes…`,'Importation des données');
+        const workerTotal=Number(d.total||total||0);
+        setLoadProgress(8+(processed/Math.max(1,workerTotal))*55,`Traitement : ${fInt(processed)} / ${fInt(workerTotal)} lignes…`,'Importation des données');
       }else if(d.type==='processDone'){
         worker.removeEventListener('message',handler); resolve();
       }else if(d.type==='error' && d.stage==='process'){
