@@ -1542,11 +1542,11 @@ function getXlsxWorker(){
       const data=ev.data||{};
       try{
         if(data.type==='prepare'){
-          const wb=XLSX.read(data.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false});
+          const wb=XLSX.read(data.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false,dense:true});
           let best=null,bestHeader=0,bestScore=-1,bestDataRows=-1,bestName='';
           for(const name of wb.SheetNames){
             const ws=wb.Sheets[name];
-            const ref=ws && ws['!ref'];
+            const ref=ws && (ws['!ref'] || ws['!fullref']);
             if(!ref) continue;
             const rg=XLSX.utils.decode_range(ref);
             const maxScan=Math.min(rg.e.r,199);
@@ -1564,12 +1564,29 @@ function getXlsxWorker(){
             }
           }
           if(!best){
-            self.postMessage({type:'prepared',ok:false,message:'Aucune feuille exploitable dans '+data.name});
+            // Certains gros classeurs peuvent exposer la dimension sous !fullref
+            // ou ne pas exposer !ref immédiatement. Dernier secours : inspecter les
+            // propriétés de feuille disponibles et utiliser la première feuille non vide.
+            for(const name of wb.SheetNames){
+              const ws=wb.Sheets[name];
+              if(!ws) continue;
+              const ref=ws['!ref'] || ws['!fullref'];
+              if(ref){
+                const rg=XLSX.utils.decode_range(ref);
+                if(rg.e.r>=rg.s.r && rg.e.c>=rg.s.c){ best={ws,rg}; bestHeader=rg.s.r; bestScore=0; bestDataRows=Math.max(0,rg.e.r-rg.s.r); bestName=name; break; }
+              }
+            }
+          }
+          if(!best){
+            self.postMessage({type:'prepared',ok:false,message:'Impossible de déterminer la dimension de la feuille '+data.name+'. Le classeur a été ouvert mais aucune plage de cellules exploitable n'a été fournie par le moteur Excel.'});
             return;
           }
           const headerRange={s:{r:bestHeader,c:best.rg.s.c},e:{r:bestHeader,c:best.rg.e.c}};
-          const hRows=XLSX.utils.sheet_to_json(best.ws,{header:1,defval:'',blankrows:false,range:headerRange});
-          const headers=(hRows[0]||[]).map(v=>String(v??''));
+          const headers=[];
+          for(let c=best.rg.s.c;c<=best.rg.e.c;c++){
+            const cell=best.ws[XLSX.utils.encode_cell({r:bestHeader,c})];
+            headers.push(cell ? String(cell.v ?? '') : '');
+          }
           if(!headers.length){
             self.postMessage({type:'prepared',ok:false,message:'Aucun en-tête détecté dans '+data.name});
             return;
