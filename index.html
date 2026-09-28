@@ -1566,49 +1566,70 @@ function normalizeHeader(v){
 }
 
 function autoMap(hdrs){
-  const normHdrs=hdrs.map(normalizeHeader);
+  // Association automatique renforcée : on utilise les anciens noms sauvegardés,
+  // les alias métier, le libellé du champ et les mots du nom de colonne.
+  // L'affectation est faite globalement afin qu'une colonne générique (ex. "Statut")
+  // ne soit pas prise avant une colonne plus précise (ex. "Statut du paiement").
+  const norm = v => String(v ?? '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase()
+    .replace(/œ/g,'oe').replace(/æ/g,'ae')
+    .replace(/[^a-z0-9]+/g,'')
+    .trim();
+  const tokens = v => (String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/œ/g,'oe').replace(/æ/g,'ae')
+    .match(/[a-z0-9]{2,}/g) || []);
+
   let saved={};
   try{ saved=JSON.parse(localStorage.getItem('gpl_column_mapping')||'{}')||{}; }catch(e){ saved={}; }
-  const result={};
-  const used=new Set();
 
-  // 1) Réutiliser en priorité les associations validées lors d'un import précédent.
-  FIELD_DEFS.forEach(f=>{
-    const wanted=normalizeHeader(saved[f.key]||'');
-    if(!wanted) return;
-    const idx=normHdrs.findIndex((h,i)=>!used.has(i) && (h===wanted || h.includes(wanted) || wanted.includes(h)));
-    if(idx>=0){ result[f.key]=idx; used.add(idx); }
-  });
+  const columns=hdrs.map((h,i)=>({i, raw:String(h), n:norm(h), tok:tokens(h)}));
+  const candidates=[];
 
-  // 2) Recherche automatique robuste : accents, espaces, tirets, slashs et variantes FR/EN.
   FIELD_DEFS.forEach(f=>{
-    if(result[f.key]!==undefined) return;
-    let best=-1, bestScore=0;
-    for(let i=0;i<hdrs.length;i++){
-      if(used.has(i)) continue;
-      const h=normHdrs[i];
-      if(!h) continue;
-      for(const rawHint of f.hints){
-        const exact=String(rawHint).startsWith('=');
-        const hint=normalizeHeader(exact?String(rawHint).slice(1):rawHint);
-        if(!hint) continue;
+    const aliases=[
+      f.key, f.label,
+      ...(Array.isArray(f.hints)?f.hints:[]),
+      saved[f.key]||''
+    ].filter(Boolean);
+
+    columns.forEach(col=>{
+      let best=0;
+      for(const aliasRaw of aliases){
+        const alias=String(aliasRaw).replace(/^=/,'');
+        const a=norm(alias);
+        if(!a) continue;
+        const at=tokens(alias);
         let score=0;
-        if(h===hint) score=1000+hint.length;
-        else if(h.includes(hint)) score=700+hint.length;
-        else if(hint.includes(h)) score=450+h.length;
-        else {
-          const ht=hint.match(/[a-z0-9]{3,}/g)||[];
-          const toks=h.match(/[a-z0-9]{3,}/g)||[];
-          const common=ht.filter(t=>toks.includes(t));
-          if(common.length) score=common.length*100+common.reduce((a,t)=>a+t.length,0);
+        if(col.n===a) score=Math.max(score,12000+a.length*10);
+        else if(col.n.includes(a)) score=Math.max(score,8500+a.length*8);
+        else if(a.includes(col.n) && col.n.length>=3) score=Math.max(score,6500+col.n.length*8);
+        const common=at.filter(t=>col.tok.includes(t));
+        if(common.length){
+          const covered=common.reduce((n,t)=>n+t.length,0);
+          score=Math.max(score,common.length*900+covered*35);
         }
-        // Les indices très génériques doivent être moins prioritaires.
-        if(['statut','status','verse','montant','colis','frais','livreur','partenaire'].includes(hint)) score-=120;
-        if(score>bestScore){bestScore=score;best=i;}
+        // Le libellé exact du champ a une priorité raisonnable.
+        if(norm(f.label)===a && col.n.includes(a)) score+=1000;
       }
-    }
-    if(best>=0 && bestScore>=120){ result[f.key]=best; used.add(best); }
+      // Bonus pour les champs obligatoires et pénalité pour les colonnes trop génériques.
+      if(f.req) best+=100;
+      if(['statut','status','verse','montant','colis','frais','livreur','partenaire'].includes(col.n)) best-=700;
+      if(best>0) candidates.push({field:f.key, idx:col.i, score:best});
+    });
   });
+
+  // Affectation globale : les correspondances les plus sûres sont attribuées en premier.
+  candidates.sort((a,b)=>b.score-a.score);
+  const result={}, used=new Set();
+  for(const c of candidates){
+    if(result[c.field]!==undefined || used.has(c.idx)) continue;
+    // Seuil volontairement bas pour les champs optionnels : les champs obligatoires
+    // restent très favorisés par leur score.
+    if(c.score<500) continue;
+    result[c.field]=c.idx;
+    used.add(c.idx);
+  }
   return result;
 }
 
