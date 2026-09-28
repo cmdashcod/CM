@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link rel="preconnect" href="https://cdn.jsdelivr.net"/>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
   <style>
     /* ── LIGHT MODE (défaut) ── */
@@ -210,15 +211,6 @@
     .up-status{display:none;font-size:10px;font-weight:600;color:rgba(255,255,255,.8);padding:7px;border-radius:7px;background:rgba(255,255,255,.09);line-height:1.4;word-break:break-word}
     .up-status.show{display:block}
     .up-status.err{background:rgba(217,79,74,.2);color:#ffb3ae}
-    .load-overlay{position:fixed;inset:0;z-index:99999;background:rgba(7,20,27,.72);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
-    .load-overlay.show{display:flex}
-    .load-box{width:min(460px,94vw);background:#fff;border-radius:16px;padding:22px 22px 18px;box-shadow:0 20px 70px rgba(0,0,0,.3);font-family:Cairo,sans-serif}
-    .load-title{font-size:16px;font-weight:900;color:#17323a;margin-bottom:6px}
-    .load-text{font-size:12px;color:#60717a;line-height:1.5;min-height:36px}
-    .load-track{height:12px;background:#e9eef1;border-radius:99px;overflow:hidden;margin-top:15px}
-    .load-bar{height:100%;width:0%;background:linear-gradient(90deg,#008996,#f5c200);transition:width .18s ease;border-radius:99px}
-    .load-pct{font-size:12px;font-weight:900;color:#17323a;text-align:right;margin-top:7px}
-    .load-note{font-size:10px;color:#87949a;margin-top:8px}
 
     /* CONTENT */
     .content{padding:14px 16px;display:flex;flex-direction:column;gap:14px;min-width:0;max-width:100%;overflow-x:hidden}
@@ -329,21 +321,6 @@
     .cod-val{font-size:22px;font-weight:900;color:var(--txt)}
     .cod-lbl{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-top:2px}
     .cod-sub{font-size:11px;font-weight:700;margin-top:4px}
-
-    /* UPLOAD CHOOSER */
-    .upload-box{background:var(--modal-bg);border-radius:18px;padding:24px;max-width:560px;width:94%;box-shadow:0 24px 64px rgba(0,0,0,.5);color:var(--txt)}
-    .upload-ttl{font-size:17px;font-weight:900;color:var(--pin-ttl);margin-bottom:5px}
-    .upload-sub{font-size:11px;color:var(--txt2);line-height:1.5;margin-bottom:14px}
-    .drop-zone{border:2px dashed var(--accent);border-radius:14px;padding:30px 18px;text-align:center;background:rgba(0,137,150,.045);cursor:pointer;transition:.18s}
-    .drop-zone:hover,.drop-zone.drag{background:rgba(0,137,150,.11);transform:translateY(-1px)}
-    .drop-ico{font-size:34px;margin-bottom:7px}.drop-main{font-size:14px;font-weight:900;color:var(--txt)}
-    .drop-help{font-size:11px;color:var(--txt2);margin-top:5px}
-    .upload-list{display:none;max-height:150px;overflow:auto;margin-top:12px;border:1px solid var(--line);border-radius:9px;padding:8px}
-    .upload-list.show{display:block}.upload-item{font-size:11px;padding:5px 7px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
-    .upload-item:last-child{border-bottom:0}.upload-count{font-weight:800;color:var(--accent)}
-    .upload-acts{display:flex;gap:8px;margin-top:14px}.upload-acts button{flex:1;height:38px;border:0;border-radius:8px;cursor:pointer;font-weight:800;font-family:'Cairo',sans-serif}
-    .btn-upload-cancel{background:var(--modal-cancel-bg);color:var(--txt2)}.btn-upload-ok{background:var(--accent);color:#fff}
-    .btn-upload-ok:disabled{opacity:.45;cursor:not-allowed}
 
     /* PIN MODAL */
     .modal-bg{display:none;position:fixed;inset:0;background:rgba(10,30,40,.62);z-index:500;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
@@ -516,24 +493,6 @@
 </head>
 <body>
 
-<!-- UPLOAD CHOOSER -->
-<div class="modal-bg" id="uploadModal">
-  <div class="upload-box">
-    <div class="upload-ttl">📂 Importer des données</div>
-    <div class="upload-sub">Choisissez un seul fichier ou déposez plusieurs fichiers Excel/CSV en une seule fois. Les fichiers doivent avoir la même structure de colonnes.</div>
-    <div class="drop-zone" id="dropZone">
-      <div class="drop-ico">⬆️</div>
-      <div class="drop-main">Glissez-déposez vos fichiers ici</div>
-      <div class="drop-help">ou cliquez pour sélectionner 1 ou plusieurs fichiers</div>
-    </div>
-    <div class="upload-list" id="uploadList"></div>
-    <div class="upload-acts">
-      <button class="btn-upload-cancel" id="uploadCancel">Annuler</button>
-      <button class="btn-upload-ok" id="uploadContinue" disabled>Continuer</button>
-    </div>
-  </div>
-</div>
-
 <!-- PIN MODAL -->
 <div class="modal-bg" id="pinModal">
   <div class="pin-box">
@@ -546,17 +505,6 @@
       <button class="btn-pin-cancel" id="pinCancel">Annuler</button>
       <button class="btn-pin-ok" id="pinOk">Valider</button>
     </div>
-  </div>
-</div>
-
-<!-- FILE LOADING OVERLAY -->
-<div class="load-overlay" id="loadOverlay" aria-live="polite">
-  <div class="load-box">
-    <div class="load-title" id="loadTitle">Chargement du fichier…</div>
-    <div class="load-text" id="loadText">Préparation du fichier.</div>
-    <div class="load-track"><div class="load-bar" id="loadBar"></div></div>
-    <div class="load-pct" id="loadPct">0 %</div>
-    <div class="load-note">Ne fermez pas l’onglet pendant le traitement.</div>
   </div>
 </div>
 
@@ -610,7 +558,7 @@
     </div>
   </div>
 </header>
-<input type="file" id="fileInp" accept=".xlsx,.xls,.csv" multiple style="display:none"/>
+<input type="file" id="fileInp" accept=".xlsx,.xls,.csv" style="display:none"/>
 
 <!-- MAIN LAYOUT -->
 <div class="layout" id="mainLayout">
@@ -1349,7 +1297,7 @@ function exportCSV(data){
 
 /* ════════════ UPLOAD / PIN / COLMAP ════════════ */
 const PIN='CMGPL';
-let _pendingFile=null, _pendingFiles=[], _rawHdrs=[], _rawRows=[];
+let _pendingFile=null, _rawHdrs=[], _rawRows=[];
 let _pinMode='upload'; // 'upload' ou 'admin'
 const FIELD_DEFS=[
   {key:'d',  label:'Date (facture / versement)', req:true,  hints:['=date','=créé le','=cree le','date création','date_création','datecreation','date cr','datecr','date_cr']},
@@ -1384,60 +1332,18 @@ function showStatus(msg,isErr=false){
 
 const fileInp = document.getElementById('fileInp');
 const importBtn = document.getElementById('importBtn');
-const uploadModal = document.getElementById('uploadModal');
-const dropZone = document.getElementById('dropZone');
-const uploadList = document.getElementById('uploadList');
-const uploadContinue = document.getElementById('uploadContinue');
-let _selectedFiles=[];
 
 function openPicker(){
   const fi = document.getElementById('fileInp');
   if(!fi) return;
   fi.disabled = false;
-  fi.value='';
   fi.click();
 }
-function showUploadChooser(){
-  _selectedFiles=[];
-  renderSelectedFiles();
-  uploadModal.classList.add('show');
-}
-function renderSelectedFiles(){
-  if(!_selectedFiles.length){
-    uploadList.classList.remove('show');
-    uploadList.innerHTML='';
-    uploadContinue.disabled=true;
-    return;
-  }
-  uploadList.innerHTML='<div class="upload-count">'+_selectedFiles.length+' fichier(s) sélectionné(s)</div>'+_selectedFiles.map(f=>`<div class="upload-item"><span>📄 ${esc(f.name)}</span><span>${(f.size/1024/1024).toFixed(1)} Mo</span></div>`).join('');
-  uploadList.classList.add('show');
-  uploadContinue.disabled=false;
-}
-function acceptFiles(fileList){
-  const files=Array.from(fileList||[]).filter(f=>/\.(xlsx|xls|csv)$/i.test(f.name));
-  if(!files.length){showStatus('❌ Aucun fichier Excel/CSV valide.',true);return;}
-  _selectedFiles=files;
-  renderSelectedFiles();
-}
-if(importBtn) importBtn.addEventListener('click', e=>{ e.stopPropagation(); showUploadChooser(); });
-if(dropZone){
-  dropZone.addEventListener('click',openPicker);
-  ['dragenter','dragover'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();e.stopPropagation();dropZone.classList.add('drag');}));
-  ['dragleave','drop'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();e.stopPropagation();dropZone.classList.remove('drag');}));
-  dropZone.addEventListener('drop',e=>acceptFiles(e.dataTransfer.files));
-}
-if(fileInp) fileInp.addEventListener('change', e=>{ acceptFiles(e.target.files); e.target.value=''; });
-document.getElementById('uploadCancel').addEventListener('click',()=>uploadModal.classList.remove('show'));
-uploadContinue.addEventListener('click',()=>{
-  if(!_selectedFiles.length)return;
-  const files=_selectedFiles.slice();
-  uploadModal.classList.remove('show');
-  openPin(files);
-});
+if(importBtn) importBtn.addEventListener('click', e=>{ e.stopPropagation(); openPicker(); });
+if(fileInp) fileInp.addEventListener('change', e=>{ const f=e.target.files[0]; if(f){e.target.value=''; openPin(f);} });
 
-function openPin(files){
-  _pendingFile=files.length===1 ? files[0] : {name:files.map(f=>f.name).join(', ')};
-  _pendingFiles=files;
+function openPin(file){
+  _pendingFile=file;
   _pinMode='upload';
   document.getElementById('pinInp').value='';
   document.getElementById('pinErr').textContent='';
@@ -1458,42 +1364,17 @@ document.getElementById('pinInp').addEventListener('keydown',e=>{if(e.key==='Ent
 document.getElementById('pinCancel').addEventListener('click',()=>{
   document.getElementById('pinModal').classList.remove('show');
   _pendingFile=null;
-  _pendingFiles=[];
   _pinMode='upload';
 });
 
-function setLoadProgress(percent,text,title){
-  const ov=document.getElementById('loadOverlay');
-  const bar=document.getElementById('loadBar');
-  const pct=document.getElementById('loadPct');
-  const tx=document.getElementById('loadText');
-  const tt=document.getElementById('loadTitle');
-  if(ov) ov.classList.add('show');
-  const p=Math.max(0,Math.min(100,Number(percent)||0));
-  if(bar) bar.style.width=p+'%';
-  if(pct) pct.textContent=Math.round(p)+' %';
-  if(tx&&text) tx.textContent=text;
-  if(tt&&title) tt.textContent=title;
-}
-function hideLoadProgress(){
-  const ov=document.getElementById('loadOverlay');
-  if(ov) ov.classList.remove('show');
-}
-function nextFrame(){return new Promise(resolve=>requestAnimationFrame(()=>resolve()));}
-
-async function validatePin(){
+function validatePin(){
   if(document.getElementById('pinInp').value===PIN){
     document.getElementById('pinModal').classList.remove('show');
     if(_pendingFile){
-      const files=_pendingFiles.slice();
-      const names=files.map(f=>f.name).join(', ');
-      _pinMode='upload';
-      setLoadProgress(2,`Lecture de ${files.length} fichier(s)…`,'Chargement des fichiers');
-      await nextFrame();
-      parseFiles(files);
-    }else{
-      _pinMode='upload';
+      parseFile(_pendingFile);
     }
+    _pendingFile=null;
+    _pinMode='upload';
   } else {
     const inp=document.getElementById('pinInp');
     inp.classList.add('err-shake');
@@ -1502,427 +1383,41 @@ async function validatePin(){
   }
 }
 
-let _xlsxWorker=null;
-
-function getXlsxWorker(){
-  if(_xlsxWorker) return _xlsxWorker;
-  const workerCode = `
-    self.importScripts('https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js');
-    const HINTS = [
-      'date','datefacture','dateversement','semaine','week','montant','crbt','frais',
-      'montantenattente','statutdupaiement','etatcod','segment','tranchesderetard',
-      'codeclpr','codecl','numero','lignesdefacturereference','lignesdefacture',
-      'livreur','emplacementactuel','typedepartenaire','partenaire','colis',
-      'delai','creationlivreur','creationpr','livraisoncod','crbtpr','livraisonversement',
-      'statutcolis','flagnonverse','verse'
-    ];
-    const files=[];
-    let processing=false;
-
-    function normHeader(v){
-      return String(v ?? '').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().replace(/œ/g,'oe').replace(/æ/g,'ae').replace(/[^a-z0-9]+/g,'');
-    }
-    function scoreHeader(row){
-      if(!Array.isArray(row)) return 0;
-      let score=0; const seen=new Set();
-      for(const v of row){
-        const n=normHeader(v); if(!n || n.length<2) continue;
-        for(const h of HINTS){
-          if(seen.has(h)) continue;
-          if(n===h){score+=5;seen.add(h);break;}
-          if(n.includes(h)||h.includes(n)){score+=1;break;}
-        }
-      }
-      return score;
-    }
-    function attrs(raw){
-      const o={};
-      const re=/([A-Za-z_:][A-Za-z0-9_.:-]*)\\s*=\\s*(["'])(.*?)\\2/g; let m;
-      while((m=re.exec(raw))) o[m[1]]=m[3];
-      return o;
-    }
-    function unescapeXml(s){
-      return String(s??'').replace(/&#x([0-9a-f]+);/gi,(_,h)=>String.fromCodePoint(parseInt(h,16))).replace(/&#(\\d+);/g,(_,n)=>String.fromCodePoint(Number(n))).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&');
-    }
-    function colFromRef(ref){
-      const m=String(ref||'').match(/([A-Z]+)\\d+/i); if(!m) return -1;
-      let n=0; for(const ch of m[1].toUpperCase()) n=n*26+(ch.charCodeAt(0)-64); return n-1;
-    }
-    function parseDim(ref){
-      const m=String(ref||'').match(/:([A-Z]+)(\\d+)/i); if(!m) return 0;
-      return Number(m[2])||0;
-    }
-    function serialToIso(v){
-      const n=Number(v); if(!Number.isFinite(n)) return v;
-      const ms=Math.round((n-25569)*86400000);
-      const d=new Date(ms);
-      if(isNaN(d)) return v;
-      return d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
-    }
-
-    function makeXmlTokenizer(onToken){
-      let buf=''; const dec=new TextDecoder('utf-8');
-      return {
-        feed(bytes,final){
-          buf += dec.decode(bytes,{stream:!final});
-          let pos=0;
-          while(true){
-            const lt=buf.indexOf('<',pos);
-            if(lt<0){buf=buf.slice(pos);return;}
-            if(lt>pos) onToken('text',buf.slice(pos,lt));
-            if(buf.startsWith('<!--',lt)){
-              const e=buf.indexOf('-->',lt+4); if(e<0){buf=buf.slice(lt);return;}
-              pos=e+3; continue;
-            }
-            if(buf.startsWith('<![CDATA[',lt)){
-              const e=buf.indexOf(']]>',lt+9); if(e<0){buf=buf.slice(lt);return;}
-              onToken('text',buf.slice(lt+9,e)); pos=e+3; continue;
-            }
-            let q=null,e=lt+1;
-            for(;e<buf.length;e++){
-              const ch=buf[e];
-              if(q){if(ch===q) q=null;}
-              else if(ch==='"'||ch==="'") q=ch;
-              else if(ch==='>') break;
-            }
-            if(e>=buf.length){buf=buf.slice(lt);return;}
-            const raw=buf.slice(lt+1,e);
-            onToken('tag',raw);
-            pos=e+1;
-          }
-        }
-      };
-    }
-
-    function parseWorkbookInfo(xml){
-      const sheets={};
-      const re=/<sheet\\b([^>]*)\\/?>/gi; let m;
-      while((m=re.exec(xml))){ const a=attrs(m[1]); if(a['r:id']) sheets[a['r:id']]=a.name||''; }
-      return sheets;
-    }
-    function parseRels(xml){
-      const rels={};
-      const re=/<Relationship\\b([^>]*)\\/?>/gi; let m;
-      while((m=re.exec(xml))){ const a=attrs(m[1]); if(a.Id&&a.Target) rels[a.Id]=a.Target; }
-      return rels;
-    }
-    function normalizeZipPath(p){
-      p=String(p||'').replace(/^\\/+/, '');
-      if(p.startsWith('xl/')) return p;
-      if(p.startsWith('/xl/')) return p.slice(1);
-      return 'xl/'+p.replace(/^\\.\\//,'');
-    }
-
-    async function streamZip(file, wanted, onData, onProgress, stopWhen){
-      const uz=new fflate.Unzip();
-      uz.register(fflate.UnzipInflate);
-      uz.onfile=entry=>{
-        const name=normalizeZipPath(entry.name);
-        if(!wanted.has(name)) return;
-        const handler=onData[name];
-        if(!handler) return;
-        entry.ondata=(err,dat,final)=>handler(err,dat,final);
-        try{entry.start();}catch(e){handler(e,null,true);}
-      };
-      const reader=file.stream().getReader();
-      let loaded=0,lastReport=0;
-      try{
-        while(true){
-          const part=await reader.read();
-          if(part.done) break;
-          loaded+=part.value.byteLength;
-          uz.push(new Uint8Array(part.value),false);
-          if(loaded-lastReport>=8*1024*1024){lastReport=loaded; onProgress&&onProgress(loaded,file.size||0);}
-          if(stopWhen&&stopWhen()) break;
-        }
-        if(!(stopWhen&&stopWhen())) uz.push(new Uint8Array(0),true);
-      }finally{
-        try{await reader.cancel();}catch(e){}
-      }
-      onProgress&&onProgress(Math.min(loaded,file.size||loaded),file.size||loaded);
-    }
-
-    async function readSmallEntries(file, entryNames, onProgress, stopWhen){
-      const texts={};
-      const wanted=new Set(entryNames);
-      const handlers={};
-      for(const n of entryNames){
-        let dec=new TextDecoder('utf-8'), txt='';
-        handlers[n]=(err,dat,final)=>{ if(err) throw err; if(dat) txt+=dec.decode(dat,{stream:!final}); if(final){txt+=dec.decode();texts[n]=txt;} };
-      }
-      await streamZip(file,wanted,handlers,onProgress,stopWhen);
-      return texts;
-    }
-
-    function parseSharedStrings(xml){
-      const out=[]; if(!xml) return out;
-      const re=/<si\\b[\\s\\S]*?<\\/si>/gi; let m;
-      while((m=re.exec(xml))){
-        const block=m[0], ts=block.match(/<t(?:\\s[^>]*)?>([\\s\\S]*?)<\\/t>/gi)||[];
-        let val=''; for(const t of ts){const mm=t.match(/<t(?:\\s[^>]*)?>([\\s\\S]*?)<\\/t>/i); if(mm) val+=unescapeXml(mm[1]);}
-        out.push(val);
-      }
-      return out;
-    }
-
-    async function prepareXlsx(file){
-      let workbookXml='', relsXml='', sharedXml='';
-      const preTexts={};
-      let sheetPath='';
-      let headerRows=[]; let dimensionRows=0; let headerDone=false; let sharedDone=false; let sheetDone=false;
-      let sheetName='';
-
-      const headerState={row:null, current:null, textTarget:null, value:'', rows:[]};
-      const sheetHandler=(err,dat,final)=>{
-        if(err) throw err;
-        if(dat){
-          const tok=prepareXlsx._tok || (prepareXlsx._tok=makeXmlTokenizer((type,val)=>{}));
-        }
-      };
-
-      const workbookHandlers={};
-      const targets=['xl/workbook.xml','xl/_rels/workbook.xml.rels','xl/sharedStrings.xml'];
-      const texts=await readSmallEntries(file,targets,(loaded,total)=>{ if(self.postMessage) self.postMessage({type:'progress',bytes:loaded,totalBytes:total,message:'Analyse légère : lecture du classeur '+(loaded/1024/1024).toFixed(1)+' / '+(total/1024/1024).toFixed(1)+' Mo'}); },()=>false);
-      workbookXml=texts['xl/workbook.xml']||''; relsXml=texts['xl/_rels/workbook.xml.rels']||''; sharedXml=texts['xl/sharedStrings.xml']||'';
-      const sheetIds=parseWorkbookInfo(workbookXml); const rels=parseRels(relsXml);
-      const firstId=Object.keys(sheetIds)[0];
-      if(!firstId||!rels[firstId]) throw new Error('Aucune feuille Excel exploitable.');
-      sheetName=sheetIds[firstId];
-      sheetPath=normalizeZipPath(rels[firstId]);
-      const sharedStrings=parseSharedStrings(sharedXml);
-
-      const state={row:null,cell:null,rows:[],dimension:0,headerCandidate:null,done:false};
-      let tokenizer=makeXmlTokenizer((type,val)=>{
-        if(type==='text'){
-          if(state.cell && state.cell.capture) state.cell.text+=val;
-          return;
-        }
-        const raw=String(val||'').trim(); if(!raw) return;
-        const closing=raw[0]==='/'; const selfClose=/\\/$/.test(raw);
-        const body=closing?raw.slice(1).trim():raw.replace(/\\/$/,'').trim();
-        const sp=body.search(/\\s/); const name=(sp<0?body:body.slice(0,sp)).toLowerCase();
-        const a=attrs(sp<0?'':body.slice(sp));
-        if(closing){
-          if(name==='v'||name==='t'||name==='f'){ if(state.cell) state.cell.capture=false; }
-          else if(name==='c'){
-            if(state.row && state.cell){
-              let v=state.cell.text||''; if(state.cell.type==='s') v=sharedStrings[Number(v)]??''; else if(state.cell.type==='inline') v=unescapeXml(v); else v=unescapeXml(v);
-              state.row[state.cell.col]=v;
-            }
-            state.cell=null;
-          } else if(name==='row'){
-            if(state.row){ const r=state.row.num; if(r<=200) state.rows.push({num:r,vals:state.row}); }
-            state.row=null;
-          }
-          return;
-        }
-        if(name==='dimension'&&a.ref){state.dimension=parseDim(a.ref);return;}
-        if(name==='row'){
-          const rn=Number(a.r||0); state.row={num:rn||state.rows.length+1,vals:[]}; return;
-        }
-        if(name==='c' && state.row){
-          state.cell={col:colFromRef(a.r),type:a.t||'',style:a.s||'',text:'',capture:false};
-          return;
-        }
-        if((name==='v'||name==='t'||name==='f') && state.cell){state.cell.capture=true;state.cell.text='';}
-      });
-      const handler={};
-      handler[sheetPath]=(err,dat,final)=>{ if(err) throw err; if(dat) tokenizer.feed(dat,final); if(final){tokenizer.feed(new Uint8Array(0),true);sheetDone=true;} };
-      await streamZip(file,new Set([sheetPath]),handler,(loaded,total)=>{},()=>false);
-
-      let best=null,bestScore=-1;
-      for(const rr of state.rows){
-        const arr=[]; for(let i=0;i<(state.rowWidth||0);i++) arr.push(rr.vals[i]??'');
-        const sc=scoreHeader(arr); if(sc>bestScore){bestScore=sc;best=rr;}
-      }
-      if(!best) throw new Error('Impossible de détecter la ligne d\'en-têtes de '+file.name);
-      const maxCol=Math.max(-1,...Object.keys(best.vals).map(Number));
-      const headers=new Array(maxCol+1).fill(''); for(let i=0;i<=maxCol;i++) headers[i]=String(best.vals[i]??'');
-      const rowCount=state.dimension || Math.max(...state.rows.map(r=>r.num),best.num)-best.num;
-      return {name:file.name,file,sheetPath,sheetName,headerRow:best.num-1,startCol:0,endCol:maxCol,headers,sharedStrings,rowCount:Math.max(0,rowCount-(best.num-1)),size:file.size||0};
-    }
-
-    async function processXlsx(state,map){
-      const sharedStrings=state.sharedStrings||[];
-      const chunkSize=30000; let currentRow=null,currentCell=null; let globalDone=0; let chunk=[]; let total=Number(state.rowCount||0);
-      let lastPost=0;
-      const emit=()=>{ if(chunk.length){globalDone+=chunk.length; self.postMessage({type:'chunk',fileIndex:state.fileIndex,fileName:state.name,records:chunk,done:globalDone,total}); chunk=[]; } };
-      const selectedByCol={}; for(const k of Object.keys(map||{})) selectedByCol[Number(map[k])]=k;
-      const wantedKeys=new Set(Object.values(selectedByCol));
-      function finishCell(){
-        if(!currentRow||!currentCell)return;
-        let v=currentCell.text||'';
-        if(currentCell.type==='s') v=sharedStrings[Number(v)]??'';
-        else if(currentCell.type==='inline') v=unescapeXml(v);
-        else v=unescapeXml(v);
-        const key=selectedByCol[currentCell.col];
-        if(key) currentRow[key]=key==='d' && /^-?\\d+(?:\\.\\d+)?$/.test(String(v).trim()) ? serialToIso(v) : v;
-        currentCell=null;
-      }
-      const tok=makeXmlTokenizer((type,val)=>{
-        if(type==='text'){ if(currentCell&&currentCell.capture) currentCell.text+=val; return; }
-        const raw=String(val||'').trim(); if(!raw)return; const closing=raw[0]==='/'; const body0=closing?raw.slice(1).trim():raw; const selfClose=/\\/$/.test(body0); const body=body0.replace(/\\/$/,'').trim(); const sp=body.search(/\\s/); const name=(sp<0?body:body.slice(0,sp)).toLowerCase(); const a=attrs(sp<0?'':body.slice(sp));
-        if(closing){
-          if(name==='v'||name==='t'||name==='f'){if(currentCell)currentCell.capture=false;}
-          else if(name==='c') finishCell();
-          else if(name==='row'){
-            if(currentRow && currentRow.__row > state.headerRow){
-              delete currentRow.__row;
-              const r={d:currentRow.d??'',w:currentRow.w??'',crbt:currentRow.crbt??'',fr:currentRow.fr??'',p:currentRow.p??'',sp:currentRow.sp??'',ec:currentRow.ec??'',s:currentRow.s??'',t:currentRow.t??'',c:currentRow.c??'',n:currentRow.n??'',lf:currentRow.lf??'',lr:currentRow.lr??'',v:currentRow.v??'',ca:currentRow.ca??'',co:currentRow.co??'',a1:currentRow.a1??'',a2:currentRow.a2??'',a3:currentRow.a3??'',a4:currentRow.a4??'',a5:currentRow.a5??'',sc:currentRow.sc??'',fv:currentRow.fv??''};
-              chunk.push(r); if(chunk.length>=chunkSize) emit();
-            }
-            currentRow=null;
-          }
-          return;
-        }
-        if(name==='row'){currentRow={__row:Number(a.r||0)};return;}
-        if(name==='c'&&currentRow){currentCell={col:colFromRef(a.r),type:a.t||'',text:'',capture:false};return;}
-        if((name==='v'||name==='t'||name==='f')&&currentCell){currentCell.capture=true;currentCell.text='';}
-      });
-      const handler={};
-      handler[state.sheetPath]=(err,dat,final)=>{if(err)throw err;if(dat)tok.feed(dat,final);if(final){tok.feed(new Uint8Array(0),true);emit();}};
-      await streamZip(state.file,new Set([state.sheetPath]),handler,(loaded,totalBytes)=>{if(loaded-lastPost>=8*1024*1024||loaded===totalBytes){lastPost=loaded;self.postMessage({type:'progress',fileIndex:state.fileIndex,fileName:state.name,bytes:loaded,totalBytes,message:'Lecture Excel par morceaux : '+(loaded/1024/1024).toFixed(1)+' / '+(totalBytes/1024/1024).toFixed(1)+' Mo'});}},()=>false);
-      return globalDone;
-    }
-
-    self.onmessage=async function(ev){
-      const data=ev.data||{};
-      try{
-        if(data.type==='clear'){files.length=0;return;}
-        if(data.type==='prepare'){
-          if(!data.file) throw new Error('Fichier absent.');
-          const f=await prepareXlsx(data.file);
-          const id=files.push(f)-1; f.id=id;
-          self.postMessage({type:'prepared',ok:true,id,headers:f.headers,rowCount:f.rowCount,sheet:f.sheetName,headerRow:f.headerRow,headerScore:1});
-          return;
-        }
-        if(data.type==='process'){
-          if(processing) throw new Error('Un traitement est déjà en cours.'); processing=true;
-          try{
-            let totalDone=0;
-            for(let i=0;i<files.length;i++){
-              files[i].fileIndex=i;
-              const n=await processXlsx(files[i],data.map||{});
-              totalDone+=n;
-              self.postMessage({type:'fileDone',fileIndex:i,fileName:files[i].name,done:totalDone,total:Number(files[i].rowCount||0)});
-            }
-            self.postMessage({type:'processDone',total:totalDone});
-          }finally{processing=false;}
-          return;
-        }
-      }catch(err){self.postMessage({type:'error',stage:data.type,message:err&&err.message?err.message:String(err)});if(data.type==='process')processing=false;}
-    };
-  `;
-  const blob=new Blob([workerCode],{type:'application/javascript'});
-  _xlsxWorker=new Worker(URL.createObjectURL(blob));
-  return _xlsxWorker;
-}
-
-function prepareOneFileInWorker(file){
-  return new Promise((resolve,reject)=>{
-    const worker=getXlsxWorker();
-    const handler=ev=>{
-      const d=ev.data||{};
-      if(d.type==='prepared'){
-        worker.removeEventListener('message',handler);
-        if(d.ok) resolve(d); else reject(new Error(d.message||'Impossible de préparer le fichier.'));
-      }else if(d.type==='progress'){
-        const total=Number(d.totalBytes||file.size||0), done=Number(d.bytes||0);
-        if(total) setLoadProgress(Math.min(65,5+(done/total)*55),d.message||('Lecture '+file.name),'Analyse du fichier');
-      }else if(d.type==='error' && d.stage==='prepare'){
-        worker.removeEventListener('message',handler); reject(new Error(d.message||'Erreur pendant l’analyse du fichier.'));
-      }
-    };
-    worker.addEventListener('message',handler);
-    try{ worker.postMessage({type:'prepare',name:file.name,file}); }
-    catch(err){ worker.removeEventListener('message',handler); reject(err); }
-  });
-}
-
-async function parseFiles(files){
-  if(!files||!files.length){hideLoadProgress();return;}
-  const allowed=/\.(xlsx|csv)$/i;
-  if(files.some(f=>!allowed.test(f.name))){hideLoadProgress();showStatus('❌ Pour les très gros fichiers, utilisez .xlsx ou .csv (pas .xls).',true);return;}
-  try{
-    _xlsxWorker=getXlsxWorker();
-    _xlsxWorker.postMessage({type:'clear'});
-    let baseHdrs=null,totalRows=0; const prepared=[];
-    for(let fi=0;fi<files.length;fi++){
-      const file=files[fi];
-      setLoadProgress(5+(fi/files.length)*55,`Lecture ${fi+1}/${files.length} : ${file.name}`,'Lecture Excel par morceaux');
-      await nextFrame();
-      const info=await prepareOneFileInWorker(file);
-      prepared.push(info); totalRows+=Number(info.rowCount||0);
-      if(!baseHdrs) baseHdrs=info.headers;
-      else{
-        const norm=h=>String(h).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[\s\-_\/]+/g,'');
-        const same=baseHdrs.length===info.headers.length&&baseHdrs.every((h,i)=>norm(h)===norm(info.headers[i]));
-        if(!same) throw new Error(`La structure de « ${file.name} » est différente du premier fichier.`);
-      }
-      setLoadProgress(60+(fi/files.length)*8,`${fInt(totalRows)} lignes détectées — ${file.name}`,'Association des colonnes');
-      await nextFrame();
-    }
-    if(!baseHdrs||!prepared.length){hideLoadProgress();showStatus('❌ Aucun fichier exploitable.',true);return;}
-    _rawHdrs=baseHdrs; _rawRows=[];
-    buildColMap(_rawHdrs);
-    window.__workerTotalRows=totalRows;
-    window.__workerPreparedFiles=prepared;
-    setLoadProgress(100,'Colonnes détectées. Validez l’association pour lancer le traitement.','Fichiers prêts');
-    setTimeout(hideLoadProgress,250);
-  }catch(err){
-    hideLoadProgress(); showStatus('❌ Erreur : '+(err?.message||err),true); console.error(err);
-  }
-}
-
-function normalizeHeader(v){
-  return String(v??'')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .toLowerCase()
-    .replace(/œ/g,'oe').replace(/æ/g,'ae')
-    .replace(/[^a-z0-9]+/g,'')
-    .trim();
+function parseFile(file){
+  const ext=file.name.split('.').pop().toLowerCase();
+  if(!['xlsx','xls','csv'].includes(ext)){showStatus('❌ Format non supporté.',true);return;}
+  const r=new FileReader();
+  r.onload=e=>{
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+      if(!raw||raw.length<2){showStatus('❌ Fichier vide.',true);return;}
+      _rawHdrs=raw[0].map(String); _rawRows=raw.slice(1);
+      buildColMap(_rawHdrs);
+    }catch(err){showStatus('❌ Erreur : '+err.message,true);}
+  };
+  r.onerror=()=>showStatus('❌ Impossible de lire le fichier.',true);
+  r.readAsArrayBuffer(file);
 }
 
 function autoMap(hdrs){
-  // Association automatique basée sur la logique d'origine du dashboard.
-  // On conserve aussi les associations mémorisées pour les fichiers réimportés.
-  const norm=h=>String(h ?? '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .toLowerCase().replace(/[\s\-_\/]+/g,'').trim();
+  const norm=h=>String(h).toLowerCase().replace(/[\s\-_\/]/g,'');
   const normHdrs=hdrs.map(norm);
-  let saved={};
-  try{ saved=JSON.parse(localStorage.getItem('gpl_column_mapping')||'{}')||{}; }catch(e){ saved={}; }
   const m={};
-  const used=new Set();
-
   FIELD_DEFS.forEach(f=>{
-    const hints=[];
-    if(saved[f.key]) hints.push('='+saved[f.key]);
-    hints.push(...f.hints);
-    hints.push(f.label);
-
-    let found=-1;
-    for(const hint of hints){
-      const exact=String(hint).startsWith('=');
-      const raw=exact ? String(hint).slice(1) : String(hint);
-      const nh=norm(raw);
-      if(!nh) continue;
-      // Correspondance exacte prioritaire.
-      for(let i=0;i<normHdrs.length;i++){
-        if(used.has(i)) continue;
-        if(normHdrs[i]===nh){ found=i; break; }
-      }
-      if(found>=0) break;
-      // Puis correspondance partielle comme dans la version d'origine.
-      if(!exact){
-        for(let i=0;i<normHdrs.length;i++){
-          if(used.has(i)) continue;
-          if(normHdrs[i].includes(nh)){ found=i; break; }
-        }
-      }
-      if(found>=0) break;
+    let found='';
+    // On essaie chaque indice (du plus spécifique au plus générique) sur TOUS les
+    // en-têtes avant de passer à l'indice suivant, pour éviter qu'un indice générique
+    // (ex: "verse") ne capture par erreur une colonne destinée à un autre champ
+    // (ex: "Versement Livreur") simplement parce qu'elle apparaît plus tôt dans le fichier.
+    for(const hint of f.hints){
+      const exact=hint.startsWith('=');
+      const nh=norm(exact?hint.slice(1):hint);
+      const idx=normHdrs.findIndex(h=>exact?h===nh:h.includes(nh));
+      if(idx>=0){ found=hdrs[idx]; break; }
     }
-    if(found>=0){ m[f.key]=found; used.add(found); }
+    m[f.key]=found;
   });
   return m;
 }
@@ -1932,9 +1427,8 @@ function buildColMap(hdrs){
   const auto=autoMap(hdrs);
   FIELD_DEFS.forEach(f=>{
     const row=document.createElement('div'); row.className='map-row';
-    const selected=auto[f.key];
-    const opts=hdrs.map((h,i)=>`<option value="${i}"${selected===i?' selected':''}>${esc(h)}</option>`).join('');
-    row.innerHTML=`<label>${f.req?'⚡ ':''}${f.label}${f.req?' *':''}</label><select id="map_${f.key}"><option value="-1"${selected===undefined?' selected':''}>— Non associé —</option>${opts}</select>`;
+    const opts=hdrs.map(h=>`<option value="${esc(h)}"${auto[f.key]===h?' selected':''}>${esc(h)}</option>`).join('');
+    row.innerHTML=`<label>${f.req?'⚡ ':''}${f.label}${f.req?' *':''}</label><select id="map_${f.key}"><option value="">— Non associé —</option>${opts}</select>`;
     grid.appendChild(row);
   });
   document.getElementById('mapModal').classList.add('show');
@@ -1945,21 +1439,9 @@ document.getElementById('mapCancel').addEventListener('click',()=>document.getEl
 
 async function applyMapping(){
   const idx={};
-  const savedMapping={};
-  FIELD_DEFS.forEach(f=>{
-    const v=document.getElementById('map_'+f.key)?.value ?? '-1';
-    const n=Number(v);
-    if(Number.isInteger(n) && n>=0 && n<_rawHdrs.length){ idx[f.key]=n; savedMapping[f.key]=_rawHdrs[n]; }
-  });
-  try{ localStorage.setItem('gpl_column_mapping',JSON.stringify(savedMapping)); }catch(e){}
+  FIELD_DEFS.forEach(f=>{ const v=document.getElementById('map_'+f.key)?.value||''; if(v)idx[f.key]=_rawHdrs.indexOf(v); });
   const missing=FIELD_DEFS.filter(f=>f.req&&(idx[f.key]===undefined||idx[f.key]<0)).map(f=>f.label);
   if(missing.length){showStatus('❌ Champs requis manquants : '+missing.join(', '),true);return;}
-
-  document.getElementById('mapModal').classList.remove('show');
-  const total=Number(window.__workerTotalRows||0);
-  setLoadProgress(2,`Lecture Excel par morceaux — traitement par blocs de 30 000…`,'Importation des données');
-  await nextFrame();
-
   const cv=(row,k)=>idx[k]!==undefined&&idx[k]>=0?row[idx[k]]??'':'';
   const ymd=dt=>{ const t=new Date(dt.getTime()+12*3600e3); return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0'); };
   const toDate=v=>{ if(!v)return''; if(v instanceof Date)return ymd(v); const s=String(v).trim(); if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10); const d=new Date(s); return isNaN(d)?s:ymd(d); };
@@ -1969,51 +1451,19 @@ async function applyMapping(){
     let s=String(v).trim().replace(/\u00a0/g,' ').replace(/\s/g,'');
     if(s.includes(',') && s.includes('.')) s=s.replace(/\./g,'').replace(',','.');
     else if(s.includes(',')) s=s.replace(',','.');
-    const n=Number(s); return Number.isFinite(n)?n:0;
+    const n=Number(s);
+    return Number.isFinite(n)?n:0;
   };
-
-  const newR=[];
-  let processed=0;
-  const worker=getXlsxWorker();
-  await new Promise((resolve,reject)=>{
-    const handler=ev=>{
-      const d=ev.data||{};
-      if(d.type==='progress'){
-        const b=Number(d.bytes||0), tb=Number(d.totalBytes||0);
-        const pp=tb?8+(b/tb)*50:8;
-        setLoadProgress(Math.min(58,pp), d.message||'Lecture Excel par morceaux…','Importation des données');
-      }else if(d.type==='chunk'){
-        const rows=d.records||[];
-        for(let i=0;i<rows.length;i++){
-          const r=rows[i];
-          newR.push({
-            d:toDate(r.d), w:String(r.w??''), crbt:sf(r.crbt), fr:sf(r.fr), p:sf(r.p),
-            sp:String(r.sp??''), ec:String(r.ec??''), s:String(r.s??''), t:String(r.t??''),
-            c:String(r.c??''), n:String(r.n??''), lf:String(r.lf??''), lr:String(r.lr??''), v:String(r.v??''), ca:String(r.ca??''), co:String(r.co??''),
-            a1:sf(r.a1), a2:sf(r.a2), a3:sf(r.a3), a4:sf(r.a4), a5:sf(r.a5),
-            sc:String(r.sc??''), fv:String(r.fv??'')
-          });
-        }
-        processed=d.done||newR.length;
-        const workerTotal=Number(d.total||total||0);
-        setLoadProgress(8+(processed/Math.max(1,workerTotal))*55,`Traitement : ${fInt(processed)} / ${fInt(workerTotal)} lignes…`,'Importation des données');
-      }else if(d.type==='processDone'){
-        worker.removeEventListener('message',handler); resolve();
-      }else if(d.type==='error' && d.stage==='process'){
-        worker.removeEventListener('message',handler); reject(new Error(d.message||'Erreur pendant le traitement.'));
-      }
-    };
-    worker.addEventListener('message',handler);
-    try{ worker.postMessage({type:'process',map:idx}); }
-    catch(err){ worker.removeEventListener('message',handler); reject(err); }
-  });
-
-  _rawRows=[];
-  setLoadProgress(64,'Calcul des filtres et des statistiques…','Finalisation');
-  await nextFrame();
+  const newR=_rawRows.filter(r=>r.some(c=>c!=='')).map(r=>({
+    d:toDate(cv(r,'d')), w:String(cv(r,'w')), crbt:sf(cv(r,'crbt')), fr:sf(cv(r,'fr')), p:sf(cv(r,'p')),
+    sp:String(cv(r,'sp')), ec:String(cv(r,'ec')), s:String(cv(r,'s')), t:String(cv(r,'t')),
+    c:String(cv(r,'c')), n:String(cv(r,'n')), lf:String(cv(r,'lf')), lr:String(cv(r,'lr')), v:String(cv(r,'v')), ca:String(cv(r,'ca')), co:String(cv(r,'co')),
+    a1:sf(cv(r,'a1')), a2:sf(cv(r,'a2')), a3:sf(cv(r,'a3')), a4:sf(cv(r,'a4')), a5:sf(cv(r,'a5')),
+    sc:String(cv(r,'sc')), fv:String(cv(r,'fv')),
+  }));
   const dates=newR.map(r=>r.d).filter(Boolean).sort();
   const newMeta={
-    sourceFile:_pendingFiles.length>1?_pendingFiles.map(f=>f.name).join(', '):(_pendingFile?.name||'Fichier importé'), rowCount:newR.length,
+    sourceFile:_pendingFile?.name||'Fichier importé', rowCount:newR.length,
     dateMin:dates[0]||'', dateMax:dates[dates.length-1]||'',
     weeks:[...new Set(newR.map(r=>r.w).filter(Boolean))].sort(),
     cities:[...new Set(newR.map(r=>r.v).filter(Boolean))].sort(),
@@ -2023,21 +1473,26 @@ async function applyMapping(){
     etatCod:[...new Set(newR.map(r=>r.ec).filter(Boolean))].sort(),
     statutColis:[...new Set(newR.map(r=>r.sc).filter(Boolean))].sort(),
   };
-  records = newR; Object.assign(meta,newMeta);
+  records.length=0; newR.forEach(r=>records.push(r)); Object.assign(meta,newMeta);
   weekSel.clear(); selDates.clear(); Object.values(F).forEach(s=>s.clear());
   document.querySelectorAll('.chip,.wchip').forEach(b=>b.classList.remove('on'));
   document.getElementById('villeFilter').value=''; document.getElementById('searchInp').value='';
   populateFilters(); updateMeta(); renderDateTags(); refresh();
+  document.getElementById('mapModal').classList.remove('show');
   const importedCRBT = newR.reduce((sum,r)=>sum+Number(r.crbt||0),0);
   const crbtColumnName = idx.crbt!==undefined ? _rawHdrs[idx.crbt] : 'Non associée';
   showStatus(`✅ ${fInt(newR.length)} lignes chargées — CRBT depuis "${crbtColumnName}" : ${fCur(importedCRBT)} — "${newMeta.sourceFile}"`);
   const savedAt=new Date().toLocaleString('fr-FR');
   lockUpload(savedAt);
-  setLoadProgress(72,`Import terminé. Sauvegarde automatique de ${fInt(records.length)} lignes…`,'Sauvegarde GitHub');
-  await nextFrame();
-  const ok=await saveCurrentDataToGitHub();
-  setLoadProgress(ok?100:72,ok?'Sauvegarde terminée.':'Les données sont chargées, mais la sauvegarde GitHub a échoué.','Terminé');
-  setTimeout(hideLoadProgress,ok?500:1200);
+  // Après l'association des colonnes, ouvrir la configuration GitHub
+  // uniquement si aucun token n'est encore enregistré. Sinon, sauvegarder directement.
+  setTimeout(()=>{
+    if(getGitHubToken()){
+      saveCurrentDataToGitHub();
+    }else{
+      openGitHubConfig('Configuration requise pour sauvegarder automatiquement data.json dans GitHub.');
+    }
+  },120);
 }
 
 function lockUpload(savedAt){
@@ -2059,162 +1514,236 @@ function unlockImport(){
 document.getElementById('unlockBtn').addEventListener('click', unlockImport);
 
 
-/* ════════════ GITHUB — DATA SPLIT LARGE VOLUME ════════════
-   - Supporte de très gros volumes (jusqu'à plusieurs centaines de milliers de lignes).
-   - Découpe automatiquement les données en fichiers JSON de 30 000 lignes maximum pour accélérer le chargement.
-   - Sauvegarde les morceaux via Git Blobs + Tree + un seul commit.
-   - Le dashboard recharge data_manifest.json puis tous les morceaux.
-   - Le token est demandé uniquement au moment de la première sauvegarde après association.
+/* ════════════ GITHUB PAGES — LECTURE + SAUVEGARDE AUTOMATIQUE data.json ════════════
+   - Le dashboard LIT data.json au démarrage.
+   - Après Upload + association des colonnes, data.json est sauvegardé automatiquement.
+   - L'écran d'authentification n'est affiché qu'après l'association des colonnes, si nécessaire.
 */
+const DATA_JSON_URL='./data.json';
 const GH_OWNER='cmdashcod';
 const GH_REPO='CM';
 const GH_BRANCH='main';
+const GH_PATH='data.json';
 const GH_API_BASE='https://api.github.com';
-const GH_MANIFEST_PATH='data_manifest.json';
-const GH_PART_PREFIX='data';
-const GH_PART_MAX_ROWS=30000;
-const GH_TOKEN_KEY='cmdash_github_token';
 
-function getGitHubToken(){ return (localStorage.getItem(GH_TOKEN_KEY)||'').trim(); }
-function setGitHubToken(t){ localStorage.setItem(GH_TOKEN_KEY,(t||'').trim()); }
-function clearGitHubToken(){ localStorage.removeItem(GH_TOKEN_KEY); }
+// Authentification GitHub : le token est demandé une seule fois
+// puis conservé dans le stockage local de CE navigateur.
+// Aucun token n'est intégré dans le HTML.
+const GH_TOKEN_STORAGE_KEY='cmdash_github_token_v1';
+
+function getGitHubToken(){
+  try{return (localStorage.getItem(GH_TOKEN_STORAGE_KEY)||'').trim();}
+  catch(e){return '';}
+}
+
+function setGitHubToken(token){
+  const t=(token||'').trim();
+  if(!t) return false;
+  if(!/^(ghp_|github_pat_)/.test(t)) return false;
+  try{localStorage.setItem(GH_TOKEN_STORAGE_KEY,t);return true;}
+  catch(e){showStatus('❌ Impossible de mémoriser le token dans ce navigateur.',true);return false;}
+}
+
+function clearGitHubToken(){
+  try{localStorage.removeItem(GH_TOKEN_STORAGE_KEY);}catch(e){}
+}
+
+function openGitHubConfig(message=''){
+  const modal=document.getElementById('githubTokenModal');
+  const input=document.getElementById('githubTokenInput');
+  const error=document.getElementById('githubTokenError');
+  if(!modal) return;
+  error.textContent=message||'';
+  error.style.display=message?'block':'none';
+  if(input) input.value='';
+  modal.style.display='flex';
+  setTimeout(()=>input?.focus(),50);
+}
+
+function closeGitHubConfig(){
+  const modal=document.getElementById('githubTokenModal');
+  if(modal) modal.style.display='none';
+}
+
+function initGitHubConfig(){
+  const input=document.getElementById('githubTokenInput');
+  const save=document.getElementById('githubTokenSave');
+  const cancel=document.getElementById('githubTokenCancel');
+  if(!input||!save) return;
+  save.addEventListener('click',async()=>{
+    const token=input.value.trim();
+    if(!/^(ghp_|github_pat_)/.test(token)){
+      openGitHubConfig('Token non reconnu. Utilisez un PAT GitHub commençant par ghp_ ou github_pat_.');
+      return;
+    }
+    if(!setGitHubToken(token)){
+      openGitHubConfig('Impossible de mémoriser ce token dans le navigateur.');
+      return;
+    }
+    // Vérification immédiate de l'accès au dépôt.
+    try{
+      const url=`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}`;
+      const r=await fetch(url,{headers:{'Accept':'application/vnd.github+json','Authorization':'Bearer '+token,'X-GitHub-Api-Version':'2022-11-28'},cache:'no-store'});
+      if(!r.ok){
+        const d=await r.json().catch(()=>({}));
+        clearGitHubToken();
+        openGitHubConfig('GitHub refuse ce token (HTTP '+r.status+'). '+(d.message||'Vérifiez le dépôt et les permissions.'));
+        return;
+      }
+      closeGitHubConfig();
+      showStatus('🔐✅ Connexion GitHub validée. Sauvegarde automatique en cours…');
+      // Le token vient d'être validé : sauvegarder immédiatement les données
+      // qui viennent d'être importées et associées.
+      await saveCurrentDataToGitHub();
+    }catch(e){
+      showStatus('⚠️ Vérification GitHub impossible : '+(e.message||e),true);
+    }
+  });
+  cancel?.addEventListener('click',closeGitHubConfig);
+  input.addEventListener('keydown',e=>{if(e.key==='Enter')save.click();});
+  // IMPORTANT : ne jamais ouvrir la fenêtre au démarrage.
+  // Elle est ouverte uniquement par applyMapping(), après l'association des colonnes,
+  // ou après un HTTP 401 lors d'une sauvegarde.
+}
 function utf8ToBase64(str){
-  const bytes=new TextEncoder().encode(str); let out=''; const chunk=0x8000;
-  for(let i=0;i<bytes.length;i+=chunk) out+=String.fromCharCode(...bytes.subarray(i,i+chunk));
+  const bytes=new TextEncoder().encode(str);
+  let out='';
+  const chunk=0x8000;
+  for(let i=0;i<bytes.length;i+=chunk){
+    out+=String.fromCharCode(...bytes.subarray(i,i+chunk));
+  }
   return btoa(out);
 }
-function base64ToUtf8(b64){
-  const bin=atob(b64.replace(/\n/g,'')); const bytes=new Uint8Array(bin.length);
-  for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
-  return new TextDecoder().decode(bytes);
-}
-function ghHeaders(token){
-  return {'Accept':'application/vnd.github+json','Authorization':'Bearer '+token,'X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'};
-}
-async function ghJson(url, options={}){
-  const r=await fetch(url,options); const d=await r.json().catch(()=>({}));
-  if(!r.ok){ const e=new Error(d.message||('HTTP '+r.status)); e.status=r.status; e.data=d; throw e; }
-  return d;
-}
-async function requestGitHubToken(){
-  let token=getGitHubToken();
-  if(token) return token;
-  token=prompt('🔐 Configuration GitHub\n\nEntrez votre token GitHub avec Contents → Read and write sur le dépôt CM.\n\nLe token sera conservé uniquement dans ce navigateur.');
-  if(!token) return null;
-  token=token.trim();
-  if(!/^(gh[pousr]_)/.test(token) && !token.startsWith('github_pat_')){
-    showStatus('❌ Format de token GitHub non reconnu.',true); return null;
-  }
-  showStatus('🔎 Vérification du token GitHub…');
-  try{
-    const me=await ghJson(GH_API_BASE+'/user',{headers:ghHeaders(token)});
-    setGitHubToken(token);
-    showStatus('✅ Token GitHub validé'+(me.login?' — '+me.login:'')+'.');
-    return token;
-  }catch(e){
-    if(e.status===401) showStatus('❌ HTTP 401 — token invalide, révoqué ou expiré.',true);
-    else showStatus('❌ Vérification GitHub impossible : '+e.message,true);
-    return null;
-  }
-}
-function makeParts(payload){
-  const records=payload.records||[];
-  const parts=[];
-  for(let i=0;i<records.length;i+=GH_PART_MAX_ROWS){
-    parts.push(records.slice(i,i+GH_PART_MAX_ROWS));
-  }
-  if(!parts.length) parts.push([]);
-  const total=parts.length;
-  return parts.map((rows,i)=>({
-    meta:i===0?payload.meta:{}, savedAt:payload.savedAt, part:i+1, parts:total,
-    fromRow:i*GH_PART_MAX_ROWS+1, toRow:i*GH_PART_MAX_ROWS+rows.length, records:rows
-  }));
-}
-async function getHeadTree(token){
-  const ref=await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/ref/heads/${encodeURIComponent(GH_BRANCH)}`,{headers:ghHeaders(token)});
-  const commit=await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/commits/${ref.object.sha}`,{headers:ghHeaders(token)});
-  return {refSha:ref.object.sha,commitSha:commit.sha,treeSha:commit.tree.sha};
-}
-async function readManifest(token){
-  try{
-    const d=await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_MANIFEST_PATH}?ref=${encodeURIComponent(GH_BRANCH)}&_=${Date.now()}`,{headers:ghHeaders(token)});
-    return JSON.parse(base64ToUtf8(d.content||''));
-  }catch(e){ if(e.status===404) return null; throw e; }
-}
-async function createBlob(token, json){
-  return ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/blobs`,{
-    method:'POST',headers:ghHeaders(token),body:JSON.stringify({content:json,encoding:'utf-8'})
+
+async function saveGitHubPart(filePath,payload,token,commitMessage){
+  const url=`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/contents/${filePath}`;
+  const headers={
+    'Accept':'application/vnd.github+json',
+    'Authorization':'Bearer '+token,
+    'X-GitHub-Api-Version':'2022-11-28',
+    'Content-Type':'application/json'
+  };
+  let sha='';
+  const getRes=await fetch(url+'?ref='+encodeURIComponent(GH_BRANCH)+'&_='+Date.now(),{
+    method:'GET',mode:'cors',cache:'no-store',headers
   });
-}
-async function deleteOldParts(token, oldManifest, newNames, treeEntries){
-  if(!oldManifest?.files) return;
-  const keep=new Set(newNames);
-  for(const name of oldManifest.files){ if(!keep.has(name)) treeEntries.push({path:name,mode:'100644',type:'blob',sha:null}); }
-}
-async function saveCurrentDataToGitHub(){
-  if(!records.length){showStatus('⚠️ Aucune donnée à enregistrer dans GitHub.',true);return false;}
-  const token=await requestGitHubToken(); if(!token) return false;
-  const payload={meta:{...meta},records:[...records],savedAt:new Date().toLocaleString('fr-FR')};
-  const parts=makeParts(payload); const names=parts.map((_,i)=>i===0?'data.json':`data${i+1}.json`);
-  showStatus(`☁️ Préparation de ${fInt(records.length)} lignes en ${parts.length} fichiers…`);
-  try{
-    const old=await readManifest(token); const head=await getHeadTree(token); const entries=[];
-    for(let i=0;i<parts.length;i++){
-      const json=JSON.stringify(parts[i]);
-      const size=new TextEncoder().encode(json).length;
-      const savePct=74+(i/parts.length)*20;
-      setLoadProgress(savePct,`Envoi GitHub : fichier ${i+1}/${parts.length} — ${(size/1024).toFixed(0)} Ko`,'Sauvegarde GitHub');
-      showStatus(`☁️ Préparation fichier ${i+1}/${parts.length} — ${(size/1024).toFixed(0)} Ko`);
-      await nextFrame();
-      const blob=await createBlob(token,json);
-      entries.push({path:names[i],mode:'100644',type:'blob',sha:blob.sha});
+  if(getRes.ok){
+    const current=await getRes.json();
+    sha=current.sha||'';
+  }else if(getRes.status!==404){
+    const d=await getRes.json().catch(()=>({}));
+    if(getRes.status===401){
+      clearGitHubToken();
+      openGitHubConfig('HTTP 401 — GitHub rejette ce token. Saisissez un nouveau token GitHub.');
     }
-    if(old?.files){ for(const oldName of old.files){ if(!names.includes(oldName)) entries.push({path:oldName,mode:'100644',type:'blob',sha:null}); } }
-    const manifest={version:2,parts:parts.length,files:names,rowCount:records.length,savedAt:payload.savedAt,rowsPerFile:GH_PART_MAX_ROWS};
-    const mb=await createBlob(token,JSON.stringify(manifest));
-    entries.push({path:GH_MANIFEST_PATH,mode:'100644',type:'blob',sha:mb.sha});
-    setLoadProgress(95,'Création du commit GitHub…','Sauvegarde GitHub');
-    showStatus('☁️ Création du commit GitHub…');
-    const tree=await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/trees`,{method:'POST',headers:ghHeaders(token),body:JSON.stringify({base_tree:head.treeSha,tree:entries})});
-    const commit=await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/commits`,{method:'POST',headers:ghHeaders(token),body:JSON.stringify({message:`Update data split (${parts.length} fichiers)`,tree:tree.sha,parents:[head.commitSha]})});
-    await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/refs/heads/${encodeURIComponent(GH_BRANCH)}`,{method:'PATCH',headers:ghHeaders(token),body:JSON.stringify({sha:commit.sha,force:false})});
-    setLoadProgress(99,'Finalisation de la sauvegarde…','Sauvegarde GitHub');
-    showStatus(`☁️✅ Sauvegarde GitHub terminée — ${fInt(records.length)} lignes / ${parts.length} fichiers`);
+    throw new Error('Lecture '+filePath+' : HTTP '+getRes.status+' — '+(d.message||'Erreur GitHub'));
+  }
+
+  const json=JSON.stringify(payload);
+  const sizeMB=new TextEncoder().encode(json).length/1048576;
+  if(sizeMB>25) throw new Error(filePath+' reste trop volumineux ('+sizeMB.toFixed(1)+' Mo).');
+
+  const body={
+    message:commitMessage,
+    content:utf8ToBase64(json),
+    branch:GH_BRANCH
+  };
+  if(sha) body.sha=sha;
+
+  const putRes=await fetch(url,{method:'PUT',mode:'cors',headers,body:JSON.stringify(body)});
+  const putData=await putRes.json().catch(()=>({}));
+  if(!putRes.ok){
+    if(putRes.status===401){
+      clearGitHubToken();
+      openGitHubConfig('HTTP 401 — GitHub rejette ce token. Saisissez un nouveau token GitHub.');
+      throw new Error('HTTP 401 — token GitHub refusé.');
+    }
+    if(putRes.status===403) throw new Error(filePath+' : HTTP 403 — '+(putData.message||'permission GitHub refusée')+'. Le token doit avoir Contents: Read and write.');
+    if(putRes.status===409) throw new Error(filePath+' : HTTP 409 — conflit. Réessayez.');
+    throw new Error(filePath+' : '+(putData.message||('HTTP '+putRes.status)));
+  }
+  return true;
+}
+
+async function saveCurrentDataToGitHub({commitMessage='Update dashboard data depuis le dashboard'}={}){
+  if(!records.length){showStatus('⚠️ Aucune donnée à enregistrer dans GitHub.',true);return false;}
+  const token=getGitHubToken();
+  if(!token || !/^(ghp_|github_pat_)/.test(token)){
+    showStatus('❌ Token GitHub absent ou format non reconnu.',true);
+    return false;
+  }
+
+  // La base est répartie en 4 fichiers pour éviter qu'un seul JSON soit trop volumineux.
+  const totalParts=4;
+  const total=records.length;
+  const parts=[];
+  for(let i=0;i<totalParts;i++){
+    const start=Math.floor(i*total/totalParts);
+    const end=Math.floor((i+1)*total/totalParts);
+    parts.push(records.slice(start,end));
+  }
+  const files=['data.json','data2.json','data3.json','data4.json'];
+  const savedAt=new Date().toLocaleString('fr-FR');
+
+  showStatus('☁️ Sauvegarde de '+fInt(total)+' lignes en 4 fichiers GitHub…');
+  try{
+    for(let i=0;i<files.length;i++){
+      const m={...meta,part:i+1,totalParts};
+      const payload={meta:m,records:parts[i],savedAt};
+      const sizeMB=new TextEncoder().encode(JSON.stringify(payload)).length/1048576;
+      showStatus('☁️ Sauvegarde '+files[i]+' ('+(i+1)+'/4) — '+sizeMB.toFixed(1)+' Mo…');
+      await saveGitHubPart(files[i],payload,token,commitMessage+' — '+files[i]);
+    }
+    showStatus('☁️✅ Sauvegarde automatique terminée : '+fInt(total)+' lignes dans data.json + data2.json + data3.json + data4.json');
     return true;
-  }catch(e){
-    if(e.status===401){clearGitHubToken();showStatus('❌ HTTP 401 — token GitHub invalide ou expiré. Il sera redemandé au prochain import.',true);}
-    else if(e.status===403) showStatus('❌ HTTP 403 — le token doit avoir Contents → Read and write sur CM.',true);
-    else if(e.status===409) showStatus('❌ HTTP 409 — le dépôt a changé pendant la sauvegarde. Réessayez.',true);
-    else showStatus('❌ Sauvegarde GitHub impossible : '+(e.message||e),true);
-    console.error(e); return false;
+  }catch(err){
+    console.error(err);
+    showStatus('❌ Sauvegarde GitHub impossible : '+(err?.message||String(err)),true);
+    return false;
   }
 }
+
+async function loadJsonPart(fileName){
+  const r=await fetch('./'+fileName+'?ts='+Date.now(),{cache:'no-store'});
+  if(r.status===404) return null;
+  if(!r.ok) throw new Error(fileName+' HTTP '+r.status);
+  const p=await r.json();
+  if(!p || !Array.isArray(p.records)) throw new Error(fileName+' invalide');
+  return p;
+}
+
 async function loadFromDataJson(){
   try{
-    let manifest;
-    const mr=await fetch('./'+GH_MANIFEST_PATH+'?ts='+Date.now(),{cache:'no-store'});
-    if(mr.ok) manifest=await mr.json();
-    const files=manifest?.files?.length?manifest.files:['data.json'];
-    const responses=await Promise.all(files.map(async file=>{
-      const r=await fetch('./'+file+'?ts='+Date.now(),{cache:'no-store'});
-      if(!r.ok) throw new Error(file+' HTTP '+r.status);
-      const p=await r.json();
-      if(!Array.isArray(p.records)) throw new Error(file+' invalide');
-      return p;
-    }));
-    const all=[]; let firstMeta={}; let savedAt='';
-    for(const p of responses){
-      all.push(...p.records);
-      if(p.meta&&Object.keys(p.meta).length) firstMeta=p.meta;
-      savedAt=p.savedAt||savedAt;
+    // data.json reste la première partie ; les trois autres sont ajoutées automatiquement.
+    const parts=await Promise.all(['data.json','data2.json','data3.json','data4.json'].map(loadJsonPart));
+    const valid=parts.filter(Boolean);
+    if(!valid.length) throw new Error('Aucun fichier de données trouvé');
+
+    records.length=0;
+    valid.forEach(p=>p.records.forEach(r=>records.push(r)));
+    Object.assign(meta,valid[0].meta||{});
+    delete meta.part;
+    delete meta.totalParts;
+    meta.rowCount=records.length;
+
+    populateFilters();
+    updateMeta();
+    refresh();
+
+    if(records.length){
+      lockUpload(valid[0].savedAt||'');
+      showStatus('☁️ Data chargé depuis '+valid.length+' fichier(s) — '+fInt(records.length)+' lignes');
     }
-    records.length=0; all.forEach(r=>records.push(r)); Object.assign(meta,firstMeta);
-    populateFilters(); updateMeta(); refresh();
-    if(all.length){lockUpload(savedAt);showStatus('☁️ Data chargé — '+fInt(all.length)+' lignes / '+files.length+' fichiers');}
     return true;
-  }catch(e){console.warn('Données split non chargées :',e);return false;}
+  }catch(e){
+    console.warn('Données JSON non chargées :',e);
+    return false;
+  }
 }
-(async function restore(){await loadFromDataJson();})();
+
+(async function restore(){
+  await loadFromDataJson();
+})();
 
 /* ════════════ AUTO-FIT KPI VALUES ════════════ */
 function fitKpiValues(){
@@ -2252,5 +1781,6 @@ window.addEventListener('resize', fitKpiValues);
     <span class="footer-pill" id="footerPeriod">📅 —</span>
   </div>
 
+\n<!-- Configuration GitHub : affichée uniquement après association des colonnes, ou après un 401 -->\n<div id="githubTokenModal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.68);align-items:center;justify-content:center;padding:20px;">\n  <div style="width:min(520px,100%);background:#fff;border-radius:16px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.35);font-family:Arial,sans-serif;">\n    <h2 style="margin:0 0 8px;font-size:22px;">🔐 Configuration GitHub</h2>\n    <p style="margin:0 0 16px;line-height:1.5;color:#444;">\n      Entrez votre token GitHub une seule fois. Il sera conservé dans le stockage local de ce navigateur et utilisé automatiquement pour sauvegarder <b>data.json</b>.\n    </p>\n    <p style="margin:0 0 12px;font-size:13px;color:#666;">\n      Dépôt : <b>cmdashcod/CM</b> · Branche : <b>main</b> · Fichier : <b>data.json</b>\n    </p>\n    <input id="githubTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_... ou github_pat_..." style="width:100%;box-sizing:border-box;padding:12px;border:1px solid #bbb;border-radius:10px;font-size:15px;margin-bottom:10px;">\n    <div id="githubTokenError" style="display:none;color:#b00020;background:#fff0f0;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;"></div>\n    <div style="font-size:12px;color:#777;line-height:1.4;margin-bottom:16px;">\n      Le token doit avoir l'autorisation <b>Contents: Read and write</b> sur le dépôt <b>CM</b>. Le token n'est pas écrit dans le fichier HTML.\n    </div>\n    <div style="display:flex;gap:10px;justify-content:flex-end;">\n      <button id="githubTokenCancel" type="button" style="padding:10px 16px;border:1px solid #bbb;background:#fff;border-radius:9px;cursor:pointer;">Annuler</button>\n      <button id="githubTokenSave" type="button" style="padding:10px 16px;border:0;background:#111;color:#fff;border-radius:9px;cursor:pointer;font-weight:600;">Enregistrer le token</button>\n    </div>\n  </div>\n</div>\n<script>document.addEventListener('DOMContentLoaded',initGitHubConfig);</script>
 </body>
 </html>
