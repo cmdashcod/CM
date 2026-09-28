@@ -1508,72 +1508,26 @@ function unlockImport(){
 document.getElementById('unlockBtn').addEventListener('click', unlockImport);
 
 
-/* ════════════ INTÉGRATION AUTOMATIQUE DES DONNÉES DANS LE HTML ════════════ */
-(function(){
-  const MARK='window.GPL_DASHBOARD_PAYLOAD=';
-  const idb=()=>new Promise((res,rej)=>{const q=indexedDB.open('gpl_fs',1);q.onupgradeneeded=()=>q.result.createObjectStore('kv');q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);});
-  const idbGet=async k=>{const db=await idb();return new Promise((res,rej)=>{const r=db.transaction('kv').objectStore('kv').get(k);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});};
-  const idbSet=async(k,v)=>{const db=await idb();return new Promise((res,rej)=>{const t=db.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=()=>res();t.onerror=()=>rej(t.error);});};
-  function build(src){
-    const a=src.indexOf(MARK);
-    if(a<0) throw new Error('Ce fichier n\'est pas le dashboard (bloc de données introuvable).');
-    const b=src.indexOf('<'+'/script>',a);
-    const json=JSON.stringify({meta:Object.assign({},meta),records:records}).replace(/<\//g,'<\\/');
-    return src.slice(0,a)+MARK+json+';'+src.slice(b);
-  }
-  async function download(){
-    let src; try{ const r=await fetch(location.href.split('#')[0]); if(!r.ok)throw 0; src=await r.text(); }catch(e){ return false; }
-    const d=new Date(), pad=n=>String(n).padStart(2,'0');
-    const name='GPL_DASH_TAWSSIL_ALL_IN_ONE_'+pad(d.getDate())+'-'+pad(d.getMonth()+1)+'-'+String(d.getFullYear()).slice(2)+'_INTEGRE.html';
-    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([build(src)],{type:'text/html;charset=utf-8'})); a.download=name; a.click();
-    showStatus('✅ '+fInt(records.length)+' lignes intégrées — "'+name+'" téléchargé'); return true;
-  }
-  window.gplAutoEmbed=async function(){
-    if(!records.length)return;
-    if(!('showOpenFilePicker' in window)){
-      if(!(await download())) showStatus('⚠ Intégration automatique non disponible sur ce navigateur — utilisez Chrome ou Edge.',true);
-      return;
-    }
-    try{
-      let h=null; try{h=await idbGet('handle');}catch(e){}
-      if(h){
-        let perm=await h.queryPermission({mode:'readwrite'});
-        if(perm!=='granted') perm=await h.requestPermission({mode:'readwrite'});
-        if(perm!=='granted') h=null;
-      }
-      if(!h){
-        showStatus('📌 Sélectionnez ce fichier HTML du dashboard (une seule fois) pour y intégrer les données…');
-        [h]=await showOpenFilePicker({mode:'readwrite',multiple:false,types:[{description:'Dashboard HTML',accept:{'text/html':['.html','.htm']}}]});
-        let perm=await h.queryPermission({mode:'readwrite'});
-        if(perm!=='granted') perm=await h.requestPermission({mode:'readwrite'});
-        if(perm!=='granted') throw new Error('Autorisation d\'écriture refusée.');
-      }
-      const out=build(await (await h.getFile()).text());
-      const w=await h.createWritable(); await w.write(out); await w.close();
-      try{await idbSet('handle',h);}catch(e){}
-      showStatus('✅ '+fInt(records.length)+' lignes intégrées automatiquement dans "'+h.name+'"');
-    }catch(e){
-      if(e&&e.name==='AbortError'){ showStatus('ℹ Données chargées, mais non intégrées au fichier (sélection annulée).',true); return; }
-      try{ if(await download()) return; }catch(_){}
-      showStatus('❌ Intégration impossible : '+(e&&e.message||e),true);
-    }
-  };
-})();
-
-/* ════════════ GITHUB PAGES — LECTURE + SAUVEGARDE AUTOMATIQUE ════════════
-   Le navigateur ne contient AUCUN token GitHub.
-   Après l'association des colonnes, saveCurrentDataToGitHub() envoie
-   directement les données au Worker sécurisé.
+/* ════════════ GITHUB PAGES — LECTURE + SAUVEGARDE AUTOMATIQUE data.json ════════════
+   - Le dashboard LIT data.json au démarrage.
+   - Après Upload + association des colonnes, data.json est sauvegardé automatiquement.
+   - Aucun écran d'authentification n'est affiché.
 */
 const DATA_JSON_URL='./data.json';
+const GH_OWNER='cmdashcod';
+const GH_REPO='CM';
+const GH_BRANCH='main';
+const GH_PATH='data.json';
+const GH_API_BASE='https://api.github.com';
 
-/*
- * URL du Worker Cloudflare à remplacer après déploiement.
- * Exemple :
- * https://cmdash-github-save.<votre-compte>.workers.dev
- */
-const SAVE_ENDPOINT='https://REMPLACER-PAR-VOTRE-WORKER.workers.dev';
-
+// Authentification automatique demandée pour ce dashboard.
+// IMPORTANT : un token placé dans un HTML public est visible par toute personne
+// pouvant consulter le code source. Il doit être limité au dépôt CM.
+// IMPORTANT : ne mettez pas un token public réel dans un dépôt partagé.
+// Remplacez uniquement cette valeur dans votre copie locale avant publication.
+const GH_AUTO_TOKEN='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';
+function getGitHubToken(){ return GH_AUTO_TOKEN.trim(); }
+function setGitHubToken(_token){}
 function utf8ToBase64(str){
   const bytes=new TextEncoder().encode(str);
   let out='';
@@ -1584,61 +1538,73 @@ function utf8ToBase64(str){
   return btoa(out);
 }
 
-/* Conservation de l'ancienne fonction pour compatibilité avec le dashboard.
-   Aucun token n'est stocké, lu ou demandé au navigateur. */
-function getGitHubToken(){ return null; }
-function setGitHubToken(_token){}
-
-/* Sauvegarde manuelle éventuelle : aucun écran d'authentification. */
-document.getElementById('GitHubSaveBtn')?.addEventListener('click',()=>saveCurrentDataToGitHub());
-
 async function saveCurrentDataToGitHub({commitMessage='Update data.json depuis le dashboard'}={}){
-  if(!records.length){
-    showStatus('⚠️ Aucune donnée à enregistrer dans GitHub.',true);
+  if(!records.length){showStatus('⚠️ Aucune donnée à enregistrer dans GitHub.',true);return false;}
+  const token=getGitHubToken();
+  if(!token || !/^(ghp_|github_pat_)/.test(token)){
+
+    showStatus('❌ Token GitHub absent ou format non reconnu. Configurez un nouveau PAT.',true);
     return false;
   }
 
-  if(!SAVE_ENDPOINT || SAVE_ENDPOINT.includes('REMPLACER-PAR-VOTRE-WORKER')){
-    showStatus('❌ Endpoint de sauvegarde non configuré. Renseignez SAVE_ENDPOINT dans index.html.',true);
-    return false;
-  }
-
-  const payload={
-    meta:{...meta},
-    records:[...records],
-    savedAt:new Date().toLocaleString('fr-FR')
-  };
-
+  const payload={meta:{...meta},records:[...records],savedAt:new Date().toLocaleString('fr-FR')};
   const json=JSON.stringify(payload);
   const sizeMB=(new TextEncoder().encode(json).length/1048576);
-  if(sizeMB>90){
-    showStatus('❌ data.json est trop volumineux ('+sizeMB.toFixed(1)+' Mo).',true);
-    return false;
-  }
+  if(sizeMB>90){showStatus('❌ data.json est trop volumineux ('+sizeMB.toFixed(1)+' Mo).',true);return false;}
 
-  showStatus('☁️ Enregistrement automatique de '+fInt(records.length)+' lignes…');
-
+  showStatus('☁️ Enregistrement automatique de '+fInt(records.length)+' lignes dans GitHub…');
   try{
-    const res=await fetch(SAVE_ENDPOINT,{
-      method:'POST',
-      mode:'cors',
-      headers:{
-        'Content-Type':'application/json'
-      },
-      body:json
+    const url=`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_PATH}`;
+    const getHeaders={
+      'Accept':'application/vnd.github+json',
+      'X-GitHub-Api-Version':'2022-11-28'
+    };
+    const getRes=await fetch(url+'?ref='+encodeURIComponent(GH_BRANCH)+'&_='+Date.now(),{
+      method:'GET',mode:'cors',cache:'no-store',headers:getHeaders
     });
-
-    const result=await res.json().catch(()=>({}));
-
-    if(!res.ok){
-      throw new Error(result.message || ('HTTP '+res.status));
+    if(!getRes.ok){
+      if(getRes.status===404) throw new Error('data.json introuvable dans cmdashcod/CM sur la branche main.');
+      throw new Error('Lecture data.json : HTTP '+getRes.status);
     }
+    const current=await getRes.json();
+    if(!current.sha)throw new Error('SHA de data.json introuvable.');
 
-    showStatus('☁️✅ Enregistré automatiquement dans GitHub — '+fInt(records.length)+' lignes');
+    // Token GitHub : classique (ghp_) ou fine-grained (github_pat_).
+    // Le token doit avoir les droits nécessaires pour modifier le contenu de ce dépôt.
+    const putHeaders={
+      'Accept':'application/vnd.github+json',
+      'Authorization':'Bearer '+token,
+      'X-GitHub-Api-Version':'2022-11-28',
+      'Content-Type':'application/json'
+    };
+    const body={
+      message:commitMessage,
+      content:utf8ToBase64(json),
+      sha:current.sha,
+      branch:GH_BRANCH
+    };
+    const putRes=await fetch(url,{method:'PUT',mode:'cors',headers:putHeaders,body:JSON.stringify(body)});
+    const putData=await putRes.json().catch(()=>({}));
+    if(!putRes.ok){
+      if(putRes.status===401){
+        throw new Error('HTTP 401 — GitHub rejette le token. Le token est invalide, révoqué ou expiré. Remplacez GH_AUTO_TOKEN par un nouveau token.');
+      }
+      if(putRes.status===403){
+        const detail=putData.message||'Permission refusée';
+        throw new Error('HTTP 403 — permission GitHub refusée : '+detail+' Le token doit avoir Contents: Read and write sur ce dépôt.');
+      }
+      if(putRes.status===404){
+        throw new Error('HTTP 404 — dépôt ou fichier introuvable. Vérifiez cmdashcod/CM, la branche main et data.json.');
+      }
+      if(putRes.status===409) throw new Error('HTTP 409 — conflit : data.json a changé entre la lecture et la sauvegarde. Réessayez.');
+      throw new Error((putData.message||('HTTP '+putRes.status)));
+    }
+    showStatus('☁️✅ Enregistré automatiquement dans serveur — '+fInt(records.length)+' lignes');
     return true;
   }catch(err){
-    console.error('Sauvegarde automatique:',err);
-    showStatus('❌ Sauvegarde automatique impossible : '+(err?.message||String(err)),true);
+    console.error(err);
+    const msg=(err?.message||String(err));
+    showStatus('❌ Sauvegarde GitHub impossible : '+msg,true);
     return false;
   }
 }
