@@ -211,6 +211,15 @@
     .up-status{display:none;font-size:10px;font-weight:600;color:rgba(255,255,255,.8);padding:7px;border-radius:7px;background:rgba(255,255,255,.09);line-height:1.4;word-break:break-word}
     .up-status.show{display:block}
     .up-status.err{background:rgba(217,79,74,.2);color:#ffb3ae}
+    .load-overlay{position:fixed;inset:0;z-index:99999;background:rgba(7,20,27,.72);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
+    .load-overlay.show{display:flex}
+    .load-box{width:min(460px,94vw);background:#fff;border-radius:16px;padding:22px 22px 18px;box-shadow:0 20px 70px rgba(0,0,0,.3);font-family:Cairo,sans-serif}
+    .load-title{font-size:16px;font-weight:900;color:#17323a;margin-bottom:6px}
+    .load-text{font-size:12px;color:#60717a;line-height:1.5;min-height:36px}
+    .load-track{height:12px;background:#e9eef1;border-radius:99px;overflow:hidden;margin-top:15px}
+    .load-bar{height:100%;width:0%;background:linear-gradient(90deg,#008996,#f5c200);transition:width .18s ease;border-radius:99px}
+    .load-pct{font-size:12px;font-weight:900;color:#17323a;text-align:right;margin-top:7px}
+    .load-note{font-size:10px;color:#87949a;margin-top:8px}
 
     /* CONTENT */
     .content{padding:14px 16px;display:flex;flex-direction:column;gap:14px;min-width:0;max-width:100%;overflow-x:hidden}
@@ -505,6 +514,17 @@
       <button class="btn-pin-cancel" id="pinCancel">Annuler</button>
       <button class="btn-pin-ok" id="pinOk">Valider</button>
     </div>
+  </div>
+</div>
+
+<!-- FILE LOADING OVERLAY -->
+<div class="load-overlay" id="loadOverlay" aria-live="polite">
+  <div class="load-box">
+    <div class="load-title" id="loadTitle">Chargement du fichier…</div>
+    <div class="load-text" id="loadText">Préparation du fichier.</div>
+    <div class="load-track"><div class="load-bar" id="loadBar"></div></div>
+    <div class="load-pct" id="loadPct">0 %</div>
+    <div class="load-note">Ne fermez pas l’onglet pendant le traitement.</div>
   </div>
 </div>
 
@@ -1367,14 +1387,39 @@ document.getElementById('pinCancel').addEventListener('click',()=>{
   _pinMode='upload';
 });
 
-function validatePin(){
+function setLoadProgress(percent,text,title){
+  const ov=document.getElementById('loadOverlay');
+  const bar=document.getElementById('loadBar');
+  const pct=document.getElementById('loadPct');
+  const tx=document.getElementById('loadText');
+  const tt=document.getElementById('loadTitle');
+  if(ov) ov.classList.add('show');
+  const p=Math.max(0,Math.min(100,Number(percent)||0));
+  if(bar) bar.style.width=p+'%';
+  if(pct) pct.textContent=Math.round(p)+' %';
+  if(tx&&text) tx.textContent=text;
+  if(tt&&title) tt.textContent=title;
+}
+function hideLoadProgress(){
+  const ov=document.getElementById('loadOverlay');
+  if(ov) ov.classList.remove('show');
+}
+function nextFrame(){return new Promise(resolve=>requestAnimationFrame(()=>resolve()));}
+
+async function validatePin(){
   if(document.getElementById('pinInp').value===PIN){
     document.getElementById('pinModal').classList.remove('show');
     if(_pendingFile){
-      parseFile(_pendingFile);
+      const file=_pendingFile;
+      const pendingName=file.name;
+      _pendingFile={name:pendingName};
+      _pinMode='upload';
+      setLoadProgress(2,'Lecture du fichier '+file.name+'…','Chargement du fichier');
+      await nextFrame();
+      parseFile(file);
+    }else{
+      _pinMode='upload';
     }
-    _pendingFile=null;
-    _pinMode='upload';
   } else {
     const inp=document.getElementById('pinInp');
     inp.classList.add('err-shake');
@@ -1385,19 +1430,40 @@ function validatePin(){
 
 function parseFile(file){
   const ext=file.name.split('.').pop().toLowerCase();
-  if(!['xlsx','xls','csv'].includes(ext)){showStatus('❌ Format non supporté.',true);return;}
+  if(!['xlsx','xls','csv'].includes(ext)){hideLoadProgress();showStatus('❌ Format non supporté.',true);return;}
+  setLoadProgress(5,'Lecture du fichier '+file.name+'…','Chargement du fichier');
   const r=new FileReader();
-  r.onload=e=>{
-    try{
-      const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
-      const ws=wb.Sheets[wb.SheetNames[0]];
-      const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-      if(!raw||raw.length<2){showStatus('❌ Fichier vide.',true);return;}
-      _rawHdrs=raw[0].map(String); _rawRows=raw.slice(1);
-      buildColMap(_rawHdrs);
-    }catch(err){showStatus('❌ Erreur : '+err.message,true);}
+  r.onprogress=e=>{
+    if(e.lengthComputable){
+      const p=5+(e.loaded/e.total)*35;
+      setLoadProgress(p,`Lecture : ${(e.loaded/1024/1024).toFixed(1)} / ${(e.total/1024/1024).toFixed(1)} Mo`,'Chargement du fichier');
+    }
   };
-  r.onerror=()=>showStatus('❌ Impossible de lire le fichier.',true);
+  r.onload=e=>{
+    setLoadProgress(42,'Analyse du fichier, veuillez patienter…','Traitement des données');
+    setTimeout(async()=>{
+      try{
+        await nextFrame();
+        const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
+        setLoadProgress(60,'Conversion des lignes…','Traitement des données');
+        await nextFrame();
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        if(!raw||raw.length<2){hideLoadProgress();showStatus('❌ Fichier vide.',true);return;}
+        setLoadProgress(82,`${fInt(raw.length-1)} lignes détectées. Préparation de l’association…`,'Préparation');
+        await nextFrame();
+        _rawHdrs=raw[0].map(String); _rawRows=raw.slice(1);
+        buildColMap(_rawHdrs);
+        setLoadProgress(100,`${fInt(_rawRows.length)} lignes prêtes. Vous pouvez associer les colonnes.`,'Fichier prêt');
+        setTimeout(hideLoadProgress,180);
+      }catch(err){
+        hideLoadProgress();
+        showStatus('❌ Erreur : '+err.message,true);
+        console.error(err);
+      }
+    },40);
+  };
+  r.onerror=()=>{hideLoadProgress();showStatus('❌ Impossible de lire le fichier.',true);};
   r.readAsArrayBuffer(file);
 }
 
@@ -1442,6 +1508,11 @@ async function applyMapping(){
   FIELD_DEFS.forEach(f=>{ const v=document.getElementById('map_'+f.key)?.value||''; if(v)idx[f.key]=_rawHdrs.indexOf(v); });
   const missing=FIELD_DEFS.filter(f=>f.req&&(idx[f.key]===undefined||idx[f.key]<0)).map(f=>f.label);
   if(missing.length){showStatus('❌ Champs requis manquants : '+missing.join(', '),true);return;}
+
+  document.getElementById('mapModal').classList.remove('show');
+  setLoadProgress(2,`Préparation de ${fInt(_rawRows.length)} lignes…`,'Importation des données');
+  await nextFrame();
+
   const cv=(row,k)=>idx[k]!==undefined&&idx[k]>=0?row[idx[k]]??'':'';
   const ymd=dt=>{ const t=new Date(dt.getTime()+12*3600e3); return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0'); };
   const toDate=v=>{ if(!v)return''; if(v instanceof Date)return ymd(v); const s=String(v).trim(); if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10); const d=new Date(s); return isNaN(d)?s:ymd(d); };
@@ -1454,13 +1525,28 @@ async function applyMapping(){
     const n=Number(s);
     return Number.isFinite(n)?n:0;
   };
-  const newR=_rawRows.filter(r=>r.some(c=>c!=='')).map(r=>({
-    d:toDate(cv(r,'d')), w:String(cv(r,'w')), crbt:sf(cv(r,'crbt')), fr:sf(cv(r,'fr')), p:sf(cv(r,'p')),
-    sp:String(cv(r,'sp')), ec:String(cv(r,'ec')), s:String(cv(r,'s')), t:String(cv(r,'t')),
-    c:String(cv(r,'c')), n:String(cv(r,'n')), lf:String(cv(r,'lf')), lr:String(cv(r,'lr')), v:String(cv(r,'v')), ca:String(cv(r,'ca')), co:String(cv(r,'co')),
-    a1:sf(cv(r,'a1')), a2:sf(cv(r,'a2')), a3:sf(cv(r,'a3')), a4:sf(cv(r,'a4')), a5:sf(cv(r,'a5')),
-    sc:String(cv(r,'sc')), fv:String(cv(r,'fv')),
-  }));
+
+  const total=_rawRows.length;
+  const newR=new Array(total);
+  const chunk=1000;
+  for(let base=0;base<total;base+=chunk){
+    const end=Math.min(total,base+chunk);
+    for(let i=base;i<end;i++){
+      const r=_rawRows[i];
+      newR[i]={
+        d:toDate(cv(r,'d')), w:String(cv(r,'w')), crbt:sf(cv(r,'crbt')), fr:sf(cv(r,'fr')), p:sf(cv(r,'p')),
+        sp:String(cv(r,'sp')), ec:String(cv(r,'ec')), s:String(cv(r,'s')), t:String(cv(r,'t')),
+        c:String(cv(r,'c')), n:String(cv(r,'n')), lf:String(cv(r,'lf')), lr:String(cv(r,'lr')), v:String(cv(r,'v')), ca:String(cv(r,'ca')), co:String(cv(r,'co')),
+        a1:sf(cv(r,'a1')), a2:sf(cv(r,'a2')), a3:sf(cv(r,'a3')), a4:sf(cv(r,'a4')), a5:sf(cv(r,'a5')),
+        sc:String(cv(r,'sc')), fv:String(cv(r,'fv'))
+      };
+    }
+    setLoadProgress(5+(end/total)*55,`Traitement : ${fInt(end)} / ${fInt(total)} lignes…`,'Importation des données');
+    await nextFrame();
+  }
+
+  setLoadProgress(64,'Calcul des filtres et des statistiques…','Finalisation');
+  await nextFrame();
   const dates=newR.map(r=>r.d).filter(Boolean).sort();
   const newMeta={
     sourceFile:_pendingFile?.name||'Fichier importé', rowCount:newR.length,
@@ -1478,15 +1564,16 @@ async function applyMapping(){
   document.querySelectorAll('.chip,.wchip').forEach(b=>b.classList.remove('on'));
   document.getElementById('villeFilter').value=''; document.getElementById('searchInp').value='';
   populateFilters(); updateMeta(); renderDateTags(); refresh();
-  document.getElementById('mapModal').classList.remove('show');
   const importedCRBT = newR.reduce((sum,r)=>sum+Number(r.crbt||0),0);
   const crbtColumnName = idx.crbt!==undefined ? _rawHdrs[idx.crbt] : 'Non associée';
   showStatus(`✅ ${fInt(newR.length)} lignes chargées — CRBT depuis "${crbtColumnName}" : ${fCur(importedCRBT)} — "${newMeta.sourceFile}"`);
   const savedAt=new Date().toLocaleString('fr-FR');
   lockUpload(savedAt);
-  // Sauvegarde GitHub automatique après l'association des colonnes.
-  // Si un token existe déjà dans la session, aucun écran supplémentaire n'est affiché.
-  setTimeout(()=>saveCurrentDataToGitHub(),120);
+  setLoadProgress(72,`Import terminé. Sauvegarde automatique de ${fInt(records.length)} lignes…`,'Sauvegarde GitHub');
+  await nextFrame();
+  const ok=await saveCurrentDataToGitHub();
+  setLoadProgress(ok?100:72,ok?'Sauvegarde terminée.':'Les données sont chargées, mais la sauvegarde GitHub a échoué.','Terminé');
+  setTimeout(hideLoadProgress,ok?500:1200);
 }
 
 function lockUpload(savedAt){
@@ -1611,7 +1698,10 @@ async function saveCurrentDataToGitHub(){
     for(let i=0;i<parts.length;i++){
       const json=JSON.stringify(parts[i]);
       const size=new TextEncoder().encode(json).length;
+      const savePct=74+(i/parts.length)*20;
+      setLoadProgress(savePct,`Envoi GitHub : fichier ${i+1}/${parts.length} — ${(size/1024).toFixed(0)} Ko`,'Sauvegarde GitHub');
       showStatus(`☁️ Préparation fichier ${i+1}/${parts.length} — ${(size/1024).toFixed(0)} Ko`);
+      await nextFrame();
       const blob=await createBlob(token,json);
       entries.push({path:names[i],mode:'100644',type:'blob',sha:blob.sha});
     }
@@ -1619,10 +1709,12 @@ async function saveCurrentDataToGitHub(){
     const manifest={version:2,parts:parts.length,files:names,rowCount:records.length,savedAt:payload.savedAt,rowsPerFile:GH_PART_MAX_ROWS};
     const mb=await createBlob(token,JSON.stringify(manifest));
     entries.push({path:GH_MANIFEST_PATH,mode:'100644',type:'blob',sha:mb.sha});
+    setLoadProgress(95,'Création du commit GitHub…','Sauvegarde GitHub');
     showStatus('☁️ Création du commit GitHub…');
     const tree=await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/trees`,{method:'POST',headers:ghHeaders(token),body:JSON.stringify({base_tree:head.treeSha,tree:entries})});
     const commit=await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/commits`,{method:'POST',headers:ghHeaders(token),body:JSON.stringify({message:`Update data split (${parts.length} fichiers)`,tree:tree.sha,parents:[head.commitSha]})});
     await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/refs/heads/${encodeURIComponent(GH_BRANCH)}`,{method:'PATCH',headers:ghHeaders(token),body:JSON.stringify({sha:commit.sha,force:false})});
+    setLoadProgress(99,'Finalisation de la sauvegarde…','Sauvegarde GitHub');
     showStatus(`☁️✅ Sauvegarde GitHub terminée — ${fInt(records.length)} lignes / ${parts.length} fichiers`);
     return true;
   }catch(e){
