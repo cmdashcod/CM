@@ -19,7 +19,7 @@ const PATH = "data.json";
  * IMPORTANT :
  * Remplacez cette origine par l'URL exacte de votre GitHub Pages.
  */
-const ALLOWED_ORIGIN = "https://cmdashcod.github.io";
+const ALLOWED_ORIGIN = "https://cmdashcod.github.io/CM/";
 
 function corsHeaders(origin) {
   return {
