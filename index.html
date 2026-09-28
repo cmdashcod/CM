@@ -1549,18 +1549,39 @@ function getXlsxWorker(){
           let best=null,bestHeader=0,bestScore=-1,bestName='';
           for(const name of wb.SheetNames){
             const ws=wb.Sheets[name];
-            const ref=ws && (ws['!ref'] || ws['!fullref']);
-            if(!ref) continue;
-            const rg=XLSX.utils.decode_range(ref);
-            const maxScan=Math.min(rg.e.r,199);
-            for(let r=rg.s.r;r<=maxScan;r++){
+            if(!ws) continue;
+            // Avec sheetRows + dense, SheetJS peut ne pas fournir !ref de façon
+            // fiable sur certains très gros XLSX. Pour la phase de préparation,
+            // on déduit donc la zone d'analyse directement des lignes chargées.
+            let rg=null;
+            const ref=ws['!ref'] || ws['!fullref'];
+            if(ref){
+              try{ rg=XLSX.utils.decode_range(ref); }catch(e){}
+            }
+            const rows=Array.isArray(ws) ? ws : null;
+            const scanRows=rows ? Math.min(rows.length,200) : 0;
+            const maxScan=rg ? Math.min(rg.e.r,199) : Math.max(0,scanRows-1);
+            const startCol=rg ? rg.s.c : 0;
+            let endCol=rg ? rg.e.c : 0;
+            if(rows){
+              for(let r=0;r<scanRows;r++) if(Array.isArray(rows[r])) endCol=Math.max(endCol,rows[r].length-1);
+            }
+            // Si la feuille n'est pas dense, on lit directement les cellules A1:...
+            // jusqu'à la largeur réellement rencontrée dans l'échantillon.
+            for(let r=0;r<=maxScan;r++){
               const row=[];
-              for(let c=rg.s.c;c<=rg.e.c;c++){
-                const cell=ws[XLSX.utils.encode_cell({r,c})];
-                row.push(cell ? cell.v : '');
+              for(let c=startCol;c<=endCol;c++){
+                let cell;
+                if(rows && Array.isArray(rows[r])) cell=rows[r][c];
+                else cell=ws[XLSX.utils.encode_cell({r,c})];
+                if(cell && typeof cell==='object' && 'v' in cell) cell=cell.v;
+                row.push(cell ?? '');
               }
               const sc=scoreHeader(row);
-              if(sc>bestScore){ best={rg}; bestHeader=r; bestScore=sc; bestName=name; }
+              if(sc>bestScore){
+                const effectiveRg=rg || {s:{r:0,c:startCol},e:{r:maxScan,c:endCol}};
+                best={rg:effectiveRg}; bestHeader=r; bestScore=sc; bestName=name;
+              }
             }
           }
           if(!best){
@@ -1569,10 +1590,12 @@ function getXlsxWorker(){
           }
           const ws=wb.Sheets[bestName];
           const rg=best.rg;
+          const denseRows=Array.isArray(ws) ? ws : null;
           const headers=[];
           for(let c=rg.s.c;c<=rg.e.c;c++){
-            const cell=ws[XLSX.utils.encode_cell({r:bestHeader,c})];
-            headers.push(cell ? String(cell.v ?? '') : '');
+            let cell=denseRows && Array.isArray(denseRows[bestHeader]) ? denseRows[bestHeader][c] : ws[XLSX.utils.encode_cell({r:bestHeader,c})];
+            if(cell && typeof cell==='object' && 'v' in cell) cell=cell.v;
+            headers.push(cell == null ? '' : String(cell));
           }
           if(!headers.some(h=>String(h).trim())){
             self.postMessage({type:'prepared',ok:false,message:'Aucun en-tête détecté dans '+data.name});
@@ -1606,8 +1629,14 @@ function getXlsxWorker(){
               const ws=wb.Sheets[f.sheetName];
               if(!ws) throw new Error('Feuille introuvable : '+f.sheetName);
               const ref=ws['!ref'] || ws['!fullref'];
-              if(!ref) throw new Error('La feuille '+f.sheetName+' ne fournit pas de plage de données.');
-              const rg=XLSX.utils.decode_range(ref);
+              let rg;
+              if(ref){
+                rg=XLSX.utils.decode_range(ref);
+              }else if(Array.isArray(ws)){
+                rg={s:{r:0,c:f.startCol},e:{r:ws.length-1,c:f.endCol}};
+              }else{
+                throw new Error('La feuille '+f.sheetName+' ne fournit pas de plage de données.');
+              }
               const lastRow=rg.e.r;
               const rowCount=Math.max(0,lastRow-f.headerRow);
               full.push({f,ws,rg,lastRow,rowCount});
