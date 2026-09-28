@@ -1611,6 +1611,7 @@ function autoMap(hdrs){
         }
         // Le libellé exact du champ a une priorité raisonnable.
         if(norm(f.label)===a && col.n.includes(a)) score+=1000;
+        if(score>best) best=score;
       }
       // Bonus pour les champs obligatoires et pénalité pour les colonnes trop génériques.
       if(f.req) best+=100;
