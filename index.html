@@ -8,7 +8,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link rel="preconnect" href="https://cdn.jsdelivr.net"/>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.20.3/dist/xlsx.full.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
   <style>
     /* ── LIGHT MODE (défaut) ── */
@@ -1508,7 +1507,7 @@ let _xlsxWorker=null;
 function getXlsxWorker(){
   if(_xlsxWorker) return _xlsxWorker;
   const workerCode = `
-    self.importScripts('https://cdn.jsdelivr.net/npm/xlsx@0.20.3/dist/xlsx.full.min.js');
+    self.importScripts('https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js');
     const HINTS = [
       'date','datefacture','dateversement','semaine','week','montant','crbt','frais',
       'montantenattente','statutdupaiement','etatcod','segment','tranchesderetard',
@@ -1517,179 +1516,301 @@ function getXlsxWorker(){
       'delai','creationlivreur','creationpr','livraisoncod','crbtpr','livraisonversement',
       'statutcolis','flagnonverse','verse'
     ];
-    const normHeader = v => String(v ?? '')
-      .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')
-      .toLowerCase().replace(/œ/g,'oe').replace(/æ/g,'ae')
-      .replace(/[^a-z0-9]+/g,'');
+    const files=[];
+    let processing=false;
+
+    function normHeader(v){
+      return String(v ?? '').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().replace(/œ/g,'oe').replace(/æ/g,'ae').replace(/[^a-z0-9]+/g,'');
+    }
     function scoreHeader(row){
       if(!Array.isArray(row)) return 0;
-      let score=0;
-      const seen=new Set();
+      let score=0; const seen=new Set();
       for(const v of row){
-        const n=normHeader(v);
-        if(!n || n.length<2) continue;
+        const n=normHeader(v); if(!n || n.length<2) continue;
         for(const h of HINTS){
           if(seen.has(h)) continue;
-          if(n===h){ score+=5; seen.add(h); break; }
-          if(n.includes(h) || h.includes(n)){ score+=1; break; }
+          if(n===h){score+=5;seen.add(h);break;}
+          if(n.includes(h)||h.includes(n)){score+=1;break;}
         }
       }
       return score;
     }
-    const files=[];
-    let processing=false;
-    self.onmessage = function(ev){
+    function attrs(raw){
+      const o={};
+      const re=/([A-Za-z_:][A-Za-z0-9_.:-]*)\\s*=\\s*(["'])(.*?)\\2/g; let m;
+      while((m=re.exec(raw))) o[m[1]]=m[3];
+      return o;
+    }
+    function unescapeXml(s){
+      return String(s??'').replace(/&#x([0-9a-f]+);/gi,(_,h)=>String.fromCodePoint(parseInt(h,16))).replace(/&#(\\d+);/g,(_,n)=>String.fromCodePoint(Number(n))).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&');
+    }
+    function colFromRef(ref){
+      const m=String(ref||'').match(/([A-Z]+)\\d+/i); if(!m) return -1;
+      let n=0; for(const ch of m[1].toUpperCase()) n=n*26+(ch.charCodeAt(0)-64); return n-1;
+    }
+    function parseDim(ref){
+      const m=String(ref||'').match(/:([A-Z]+)(\\d+)/i); if(!m) return 0;
+      return Number(m[2])||0;
+    }
+    function serialToIso(v){
+      const n=Number(v); if(!Number.isFinite(n)) return v;
+      const ms=Math.round((n-25569)*86400000);
+      const d=new Date(ms);
+      if(isNaN(d)) return v;
+      return d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
+    }
+
+    function makeXmlTokenizer(onToken){
+      let buf=''; const dec=new TextDecoder('utf-8');
+      return {
+        feed(bytes,final){
+          buf += dec.decode(bytes,{stream:!final});
+          let pos=0;
+          while(true){
+            const lt=buf.indexOf('<',pos);
+            if(lt<0){buf=buf.slice(pos);return;}
+            if(lt>pos) onToken('text',buf.slice(pos,lt));
+            if(buf.startsWith('<!--',lt)){
+              const e=buf.indexOf('-->',lt+4); if(e<0){buf=buf.slice(lt);return;}
+              pos=e+3; continue;
+            }
+            if(buf.startsWith('<![CDATA[',lt)){
+              const e=buf.indexOf(']]>',lt+9); if(e<0){buf=buf.slice(lt);return;}
+              onToken('text',buf.slice(lt+9,e)); pos=e+3; continue;
+            }
+            let q=null,e=lt+1;
+            for(;e<buf.length;e++){
+              const ch=buf[e];
+              if(q){if(ch===q) q=null;}
+              else if(ch==='"'||ch==="'") q=ch;
+              else if(ch==='>') break;
+            }
+            if(e>=buf.length){buf=buf.slice(lt);return;}
+            const raw=buf.slice(lt+1,e);
+            onToken('tag',raw);
+            pos=e+1;
+          }
+        }
+      };
+    }
+
+    function parseWorkbookInfo(xml){
+      const sheets={};
+      const re=/<sheet\\b([^>]*)\\/?>/gi; let m;
+      while((m=re.exec(xml))){ const a=attrs(m[1]); if(a['r:id']) sheets[a['r:id']]=a.name||''; }
+      return sheets;
+    }
+    function parseRels(xml){
+      const rels={};
+      const re=/<Relationship\\b([^>]*)\\/?>/gi; let m;
+      while((m=re.exec(xml))){ const a=attrs(m[1]); if(a.Id&&a.Target) rels[a.Id]=a.Target; }
+      return rels;
+    }
+    function normalizeZipPath(p){
+      p=String(p||'').replace(/^\\/+/, '');
+      if(p.startsWith('xl/')) return p;
+      if(p.startsWith('/xl/')) return p.slice(1);
+      return 'xl/'+p.replace(/^\\.\\//,'');
+    }
+
+    async function streamZip(file, wanted, onData, onProgress, stopWhen){
+      const uz=new fflate.Unzip();
+      uz.register(fflate.UnzipInflate);
+      uz.onfile=entry=>{
+        const name=normalizeZipPath(entry.name);
+        if(!wanted.has(name)) return;
+        const handler=onData[name];
+        if(!handler) return;
+        entry.ondata=(err,dat,final)=>handler(err,dat,final);
+        try{entry.start();}catch(e){handler(e,null,true);}
+      };
+      const reader=file.stream().getReader();
+      let loaded=0,lastReport=0;
+      try{
+        while(true){
+          const part=await reader.read();
+          if(part.done) break;
+          loaded+=part.value.byteLength;
+          uz.push(new Uint8Array(part.value),false);
+          if(loaded-lastReport>=8*1024*1024){lastReport=loaded; onProgress&&onProgress(loaded,file.size||0);}
+          if(stopWhen&&stopWhen()) break;
+        }
+        if(!(stopWhen&&stopWhen())) uz.push(new Uint8Array(0),true);
+      }finally{
+        try{await reader.cancel();}catch(e){}
+      }
+      onProgress&&onProgress(Math.min(loaded,file.size||loaded),file.size||loaded);
+    }
+
+    async function readSmallEntries(file, entryNames, onProgress, stopWhen){
+      const texts={};
+      const wanted=new Set(entryNames);
+      const handlers={};
+      for(const n of entryNames){
+        let dec=new TextDecoder('utf-8'), txt='';
+        handlers[n]=(err,dat,final)=>{ if(err) throw err; if(dat) txt+=dec.decode(dat,{stream:!final}); if(final){txt+=dec.decode();texts[n]=txt;} };
+      }
+      await streamZip(file,wanted,handlers,onProgress,stopWhen);
+      return texts;
+    }
+
+    function parseSharedStrings(xml){
+      const out=[]; if(!xml) return out;
+      const re=/<si\\b[\\s\\S]*?<\\/si>/gi; let m;
+      while((m=re.exec(xml))){
+        const block=m[0], ts=block.match(/<t(?:\\s[^>]*)?>([\\s\\S]*?)<\\/t>/gi)||[];
+        let val=''; for(const t of ts){const mm=t.match(/<t(?:\\s[^>]*)?>([\\s\\S]*?)<\\/t>/i); if(mm) val+=unescapeXml(mm[1]);}
+        out.push(val);
+      }
+      return out;
+    }
+
+    async function prepareXlsx(file){
+      let workbookXml='', relsXml='', sharedXml='';
+      const preTexts={};
+      let sheetPath='';
+      let headerRows=[]; let dimensionRows=0; let headerDone=false; let sharedDone=false; let sheetDone=false;
+      let sheetName='';
+
+      const headerState={row:null, current:null, textTarget:null, value:'', rows:[]};
+      const sheetHandler=(err,dat,final)=>{
+        if(err) throw err;
+        if(dat){
+          const tok=prepareXlsx._tok || (prepareXlsx._tok=makeXmlTokenizer((type,val)=>{}));
+        }
+      };
+
+      const workbookHandlers={};
+      const targets=['xl/workbook.xml','xl/_rels/workbook.xml.rels','xl/sharedStrings.xml'];
+      const texts=await readSmallEntries(file,targets,(loaded,total)=>{ if(self.postMessage) self.postMessage({type:'progress',bytes:loaded,totalBytes:total,message:'Analyse légère : lecture du classeur '+(loaded/1024/1024).toFixed(1)+' / '+(total/1024/1024).toFixed(1)+' Mo'}); },()=>false);
+      workbookXml=texts['xl/workbook.xml']||''; relsXml=texts['xl/_rels/workbook.xml.rels']||''; sharedXml=texts['xl/sharedStrings.xml']||'';
+      const sheetIds=parseWorkbookInfo(workbookXml); const rels=parseRels(relsXml);
+      const firstId=Object.keys(sheetIds)[0];
+      if(!firstId||!rels[firstId]) throw new Error('Aucune feuille Excel exploitable.');
+      sheetName=sheetIds[firstId];
+      sheetPath=normalizeZipPath(rels[firstId]);
+      const sharedStrings=parseSharedStrings(sharedXml);
+
+      const state={row:null,cell:null,rows:[],dimension:0,headerCandidate:null,done:false};
+      let tokenizer=makeXmlTokenizer((type,val)=>{
+        if(type==='text'){
+          if(state.cell && state.cell.capture) state.cell.text+=val;
+          return;
+        }
+        const raw=String(val||'').trim(); if(!raw) return;
+        const closing=raw[0]==='/'; const selfClose=/\\/$/.test(raw);
+        const body=closing?raw.slice(1).trim():raw.replace(/\\/$/,'').trim();
+        const sp=body.search(/\\s/); const name=(sp<0?body:body.slice(0,sp)).toLowerCase();
+        const a=attrs(sp<0?'':body.slice(sp));
+        if(closing){
+          if(name==='v'||name==='t'||name==='f'){ if(state.cell) state.cell.capture=false; }
+          else if(name==='c'){
+            if(state.row && state.cell){
+              let v=state.cell.text||''; if(state.cell.type==='s') v=sharedStrings[Number(v)]??''; else if(state.cell.type==='inline') v=unescapeXml(v); else v=unescapeXml(v);
+              state.row[state.cell.col]=v;
+            }
+            state.cell=null;
+          } else if(name==='row'){
+            if(state.row){ const r=state.row.num; if(r<=200) state.rows.push({num:r,vals:state.row}); }
+            state.row=null;
+          }
+          return;
+        }
+        if(name==='dimension'&&a.ref){state.dimension=parseDim(a.ref);return;}
+        if(name==='row'){
+          const rn=Number(a.r||0); state.row={num:rn||state.rows.length+1,vals:[]}; return;
+        }
+        if(name==='c' && state.row){
+          state.cell={col:colFromRef(a.r),type:a.t||'',style:a.s||'',text:'',capture:false};
+          return;
+        }
+        if((name==='v'||name==='t'||name==='f') && state.cell){state.cell.capture=true;state.cell.text='';}
+      });
+      const handler={};
+      handler[sheetPath]=(err,dat,final)=>{ if(err) throw err; if(dat) tokenizer.feed(dat,final); if(final){tokenizer.feed(new Uint8Array(0),true);sheetDone=true;} };
+      await streamZip(file,new Set([sheetPath]),handler,(loaded,total)=>{},()=>false);
+
+      let best=null,bestScore=-1;
+      for(const rr of state.rows){
+        const arr=[]; for(let i=0;i<(state.rowWidth||0);i++) arr.push(rr.vals[i]??'');
+        const sc=scoreHeader(arr); if(sc>bestScore){bestScore=sc;best=rr;}
+      }
+      if(!best) throw new Error('Impossible de détecter la ligne d\'en-têtes de '+file.name);
+      const maxCol=Math.max(-1,...Object.keys(best.vals).map(Number));
+      const headers=new Array(maxCol+1).fill(''); for(let i=0;i<=maxCol;i++) headers[i]=String(best.vals[i]??'');
+      const rowCount=state.dimension || Math.max(...state.rows.map(r=>r.num),best.num)-best.num;
+      return {name:file.name,file,sheetPath,sheetName,headerRow:best.num-1,startCol:0,endCol:maxCol,headers,sharedStrings,rowCount:Math.max(0,rowCount-(best.num-1)),size:file.size||0};
+    }
+
+    async function processXlsx(state,map){
+      const sharedStrings=state.sharedStrings||[];
+      const chunkSize=30000; let currentRow=null,currentCell=null; let globalDone=0; let chunk=[]; let total=Number(state.rowCount||0);
+      let lastPost=0;
+      const emit=()=>{ if(chunk.length){globalDone+=chunk.length; self.postMessage({type:'chunk',fileIndex:state.fileIndex,fileName:state.name,records:chunk,done:globalDone,total}); chunk=[]; } };
+      const selectedByCol={}; for(const k of Object.keys(map||{})) selectedByCol[Number(map[k])]=k;
+      const wantedKeys=new Set(Object.values(selectedByCol));
+      function finishCell(){
+        if(!currentRow||!currentCell)return;
+        let v=currentCell.text||'';
+        if(currentCell.type==='s') v=sharedStrings[Number(v)]??'';
+        else if(currentCell.type==='inline') v=unescapeXml(v);
+        else v=unescapeXml(v);
+        const key=selectedByCol[currentCell.col];
+        if(key) currentRow[key]=key==='d' && /^-?\\d+(?:\\.\\d+)?$/.test(String(v).trim()) ? serialToIso(v) : v;
+        currentCell=null;
+      }
+      const tok=makeXmlTokenizer((type,val)=>{
+        if(type==='text'){ if(currentCell&&currentCell.capture) currentCell.text+=val; return; }
+        const raw=String(val||'').trim(); if(!raw)return; const closing=raw[0]==='/'; const body0=closing?raw.slice(1).trim():raw; const selfClose=/\\/$/.test(body0); const body=body0.replace(/\\/$/,'').trim(); const sp=body.search(/\\s/); const name=(sp<0?body:body.slice(0,sp)).toLowerCase(); const a=attrs(sp<0?'':body.slice(sp));
+        if(closing){
+          if(name==='v'||name==='t'||name==='f'){if(currentCell)currentCell.capture=false;}
+          else if(name==='c') finishCell();
+          else if(name==='row'){
+            if(currentRow && currentRow.__row > state.headerRow){
+              delete currentRow.__row;
+              const r={d:currentRow.d??'',w:currentRow.w??'',crbt:currentRow.crbt??'',fr:currentRow.fr??'',p:currentRow.p??'',sp:currentRow.sp??'',ec:currentRow.ec??'',s:currentRow.s??'',t:currentRow.t??'',c:currentRow.c??'',n:currentRow.n??'',lf:currentRow.lf??'',lr:currentRow.lr??'',v:currentRow.v??'',ca:currentRow.ca??'',co:currentRow.co??'',a1:currentRow.a1??'',a2:currentRow.a2??'',a3:currentRow.a3??'',a4:currentRow.a4??'',a5:currentRow.a5??'',sc:currentRow.sc??'',fv:currentRow.fv??''};
+              chunk.push(r); if(chunk.length>=chunkSize) emit();
+            }
+            currentRow=null;
+          }
+          return;
+        }
+        if(name==='row'){currentRow={__row:Number(a.r||0)};return;}
+        if(name==='c'&&currentRow){currentCell={col:colFromRef(a.r),type:a.t||'',text:'',capture:false};return;}
+        if((name==='v'||name==='t'||name==='f')&&currentCell){currentCell.capture=true;currentCell.text='';}
+      });
+      const handler={};
+      handler[state.sheetPath]=(err,dat,final)=>{if(err)throw err;if(dat)tok.feed(dat,final);if(final){tok.feed(new Uint8Array(0),true);emit();}};
+      await streamZip(state.file,new Set([state.sheetPath]),handler,(loaded,totalBytes)=>{if(loaded-lastPost>=8*1024*1024||loaded===totalBytes){lastPost=loaded;self.postMessage({type:'progress',fileIndex:state.fileIndex,fileName:state.name,bytes:loaded,totalBytes,message:'Lecture Excel par morceaux : '+(loaded/1024/1024).toFixed(1)+' / '+(totalBytes/1024/1024).toFixed(1)+' Mo'});}},()=>false);
+      return globalDone;
+    }
+
+    self.onmessage=async function(ev){
       const data=ev.data||{};
       try{
+        if(data.type==='clear'){files.length=0;return;}
         if(data.type==='prepare'){
-          // IMPORTANT : ne pas analyser les 757k lignes ici. On ne lit qu'un petit
-          // échantillon pour trouver la feuille et l'en-tête. Le classeur complet
-          // sera analysé uniquement après que l'utilisateur a validé l'association.
-          const wb=XLSX.read(data.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false,dense:true,sheetRows:200});
-          let best=null,bestHeader=0,bestScore=-1,bestName='';
-          for(const name of wb.SheetNames){
-            const ws=wb.Sheets[name];
-            if(!ws) continue;
-            // Avec sheetRows + dense, SheetJS peut ne pas fournir !ref de façon
-            // fiable sur certains très gros XLSX. Pour la phase de préparation,
-            // on déduit donc la zone d'analyse directement des lignes chargées.
-            let rg=null;
-            const ref=ws['!ref'] || ws['!fullref'];
-            if(ref){
-              try{ rg=XLSX.utils.decode_range(ref); }catch(e){}
-            }
-            const rows=Array.isArray(ws) ? ws : null;
-            const scanRows=rows ? Math.min(rows.length,200) : 0;
-            const maxScan=rg ? Math.min(rg.e.r,199) : Math.max(0,scanRows-1);
-            const startCol=rg ? rg.s.c : 0;
-            let endCol=rg ? rg.e.c : 0;
-            if(rows){
-              for(let r=0;r<scanRows;r++) if(Array.isArray(rows[r])) endCol=Math.max(endCol,rows[r].length-1);
-            }
-            // Si la feuille n'est pas dense, on lit directement les cellules A1:...
-            // jusqu'à la largeur réellement rencontrée dans l'échantillon.
-            for(let r=0;r<=maxScan;r++){
-              const row=[];
-              for(let c=startCol;c<=endCol;c++){
-                let cell;
-                if(rows && Array.isArray(rows[r])) cell=rows[r][c];
-                else cell=ws[XLSX.utils.encode_cell({r,c})];
-                if(cell && typeof cell==='object' && 'v' in cell) cell=cell.v;
-                row.push(cell ?? '');
-              }
-              const sc=scoreHeader(row);
-              if(sc>bestScore){
-                const effectiveRg=rg || {s:{r:0,c:startCol},e:{r:maxScan,c:endCol}};
-                best={rg:effectiveRg}; bestHeader=r; bestScore=sc; bestName=name;
-              }
-            }
-          }
-          if(!best){
-            self.postMessage({type:'prepared',ok:false,message:'Impossible de lire les premières lignes de '+data.name+'. Le fichier Excel ne contient pas de feuille exploitable.'});
-            return;
-          }
-          const ws=wb.Sheets[bestName];
-          const rg=best.rg;
-          const denseRows=Array.isArray(ws) ? ws : null;
-          const headers=[];
-          for(let c=rg.s.c;c<=rg.e.c;c++){
-            let cell=denseRows && Array.isArray(denseRows[bestHeader]) ? denseRows[bestHeader][c] : ws[XLSX.utils.encode_cell({r:bestHeader,c})];
-            if(cell && typeof cell==='object' && 'v' in cell) cell=cell.v;
-            headers.push(cell == null ? '' : String(cell));
-          }
-          if(!headers.some(h=>String(h).trim())){
-            self.postMessage({type:'prepared',ok:false,message:'Aucun en-tête détecté dans '+data.name});
-            return;
-          }
-          // On conserve le buffer dans le Worker. Il ne retourne PAS à la page.
-          // Cela évite le transfert massif des centaines de milliers de cellules.
-          const state={
-            name:data.name, buffer:data.buffer, sheetName:bestName,
-            startCol:rg.s.c, endCol:rg.e.c, headerRow:bestHeader,
-            headers
-          };
-          const id=files.push(state)-1;
-          self.postMessage({type:'prepared',ok:true,id,headers,rowCount:0,sheet:bestName,headerRow:bestHeader,headerScore:bestScore});
+          if(!data.file) throw new Error('Fichier absent.');
+          const f=await prepareXlsx(data.file);
+          const id=files.push(f)-1; f.id=id;
+          self.postMessage({type:'prepared',ok:true,id,headers:f.headers,rowCount:f.rowCount,sheet:f.sheetName,headerRow:f.headerRow,headerScore:1});
           return;
         }
         if(data.type==='process'){
-          if(processing) throw new Error('Un traitement est déjà en cours.');
-          processing=true;
-          const chunkSize=30000;
-          const val=(row,idx)=>idx>=0 && idx<row.length ? row[idx] : '';
+          if(processing) throw new Error('Un traitement est déjà en cours.'); processing=true;
           try{
-            let globalDone=0;
-            let total=0;
-            const jobs=[];
-
-            // IMPORTANT : le classeur est parsé une seule fois par fichier dans le Worker,
-            // mais les données utiles sont immédiatement extraites par blocs de 30 000.
-            // On ne renvoie JAMAIS les 40 colonnes brutes au thread principal.
-            for(let fi=0;fi<files.length;fi++){
-              const f=files[fi];
-              let wb=XLSX.read(f.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false,cellStyles:false,cellHTML:false,cellFormula:false,dense:true,WTF:false});
-              const ws=wb.Sheets[f.sheetName];
-              if(!ws) throw new Error('Feuille introuvable : '+f.sheetName);
-              const ref=ws['!ref'] || ws['!fullref'];
-              let rg;
-              if(ref) rg=XLSX.utils.decode_range(ref);
-              else if(Array.isArray(ws)) rg={s:{r:f.headerRow,c:f.startCol},e:{r:ws.length-1,c:f.endCol}};
-              else throw new Error('La feuille '+f.sheetName+' ne fournit pas de plage de données.');
-
-              const lastRow=rg.e.r;
-              const rowCount=Math.max(0,lastRow-f.headerRow);
-              total+=rowCount;
-              jobs.push({f,ws,lastRow,rowCount});
-
-              // Le buffer original n'est plus nécessaire après le parse : libérer cette référence
-              // réduit fortement le pic mémoire sur les fichiers de 100+ Mo.
-              f.buffer=null;
-              wb=null;
-              self.postMessage({type:'progress',done:globalDone,total,fileIndex:fi,fileName:f.name,message:'Feuille '+f.sheetName+' : '+rowCount.toLocaleString()+' lignes détectées'});
+            let totalDone=0;
+            for(let i=0;i<files.length;i++){
+              files[i].fileIndex=i;
+              const n=await processXlsx(files[i],data.map||{});
+              totalDone+=n;
+              self.postMessage({type:'fileDone',fileIndex:i,fileName:files[i].name,done:totalDone,total:Number(files[i].rowCount||0)});
             }
-
-            // Deuxième passage : extraction et transformation par blocs.
-            for(let fi=0;fi<jobs.length;fi++){
-              const x=jobs[fi], f=x.f;
-              // Les indices des champs sont préparés à partir des en-têtes au moment de l'association.
-              const colIndex={};
-              // Ces indices sont envoyés avec la commande process (voir processMapping ci-dessous).
-              const map=data.map||{};
-              for(const k of Object.keys(map)) colIndex[k]=Number(map[k]);
-
-              for(let start=f.headerRow+1; start<=x.lastRow; start+=chunkSize){
-                const end=Math.min(x.lastRow,start+chunkSize-1);
-                const rows=XLSX.utils.sheet_to_json(x.ws,{header:1,defval:'',blankrows:false,raw:true,range:{s:{r:start,c:f.startCol},e:{r:end,c:f.endCol}}});
-                const out=new Array(rows.length);
-                for(let i=0;i<rows.length;i++){
-                  const r=rows[i];
-                  out[i]={
-                    d:val(r,colIndex.d), w:val(r,colIndex.w), crbt:val(r,colIndex.crbt), fr:val(r,colIndex.fr), p:val(r,colIndex.p),
-                    sp:val(r,colIndex.sp), ec:val(r,colIndex.ec), s:val(r,colIndex.s), t:val(r,colIndex.t), c:val(r,colIndex.c),
-                    n:val(r,colIndex.n), lf:val(r,colIndex.lf), lr:val(r,colIndex.lr), v:val(r,colIndex.v), ca:val(r,colIndex.ca),
-                    co:val(r,colIndex.co), a1:val(r,colIndex.a1), a2:val(r,colIndex.a2), a3:val(r,colIndex.a3), a4:val(r,colIndex.a4),
-                    a5:val(r,colIndex.a5), sc:val(r,colIndex.sc), fv:val(r,colIndex.fv)
-                  };
-                }
-                globalDone+=out.length;
-                self.postMessage({type:'chunk',fileIndex:fi,fileName:f.name,records:out,done:globalDone,total});
-                // Laisser le Worker respirer entre deux blocs.
-                await new Promise(r=>setTimeout(r,0));
-              }
-              jobs[fi].ws=null;
-            }
-            self.postMessage({type:'processDone',total});
-          }finally{ processing=false; }
+            self.postMessage({type:'processDone',total:totalDone});
+          }finally{processing=false;}
           return;
         }
-        if(data.type==='clear'){
-          files.length=0;
-          return;
-        }
-      }catch(err){
-        self.postMessage({type:'error',stage:data.type,message:err&&err.message?err.message:String(err)});
-        if(data.type==='process') processing=false;
-      }
+      }catch(err){self.postMessage({type:'error',stage:data.type,message:err&&err.message?err.message:String(err)});if(data.type==='process')processing=false;}
     };
   `;
   const blob=new Blob([workerCode],{type:'application/javascript'});
@@ -1697,7 +1818,7 @@ function getXlsxWorker(){
   return _xlsxWorker;
 }
 
-function prepareOneFileInWorker(file,buffer){
+function prepareOneFileInWorker(file){
   return new Promise((resolve,reject)=>{
     const worker=getXlsxWorker();
     const handler=ev=>{
@@ -1705,69 +1826,51 @@ function prepareOneFileInWorker(file,buffer){
       if(d.type==='prepared'){
         worker.removeEventListener('message',handler);
         if(d.ok) resolve(d); else reject(new Error(d.message||'Impossible de préparer le fichier.'));
+      }else if(d.type==='progress'){
+        const total=Number(d.totalBytes||file.size||0), done=Number(d.bytes||0);
+        if(total) setLoadProgress(Math.min(65,5+(done/total)*55),d.message||('Lecture '+file.name),'Analyse du fichier');
       }else if(d.type==='error' && d.stage==='prepare'){
-        worker.removeEventListener('message',handler);
-        reject(new Error(d.message||'Erreur pendant l’analyse du fichier.'));
+        worker.removeEventListener('message',handler); reject(new Error(d.message||'Erreur pendant l’analyse du fichier.'));
       }
     };
     worker.addEventListener('message',handler);
-    try{ worker.postMessage({type:'prepare',name:file.name,buffer},[buffer]); }
+    try{ worker.postMessage({type:'prepare',name:file.name,file}); }
     catch(err){ worker.removeEventListener('message',handler); reject(err); }
   });
 }
 
 async function parseFiles(files){
   if(!files||!files.length){hideLoadProgress();return;}
-  const allowed=/\.(xlsx|xls|csv)$/i;
-  if(files.some(f=>!allowed.test(f.name))){hideLoadProgress();showStatus('❌ Un ou plusieurs fichiers ne sont pas au format Excel/CSV.',true);return;}
+  const allowed=/\.(xlsx|csv)$/i;
+  if(files.some(f=>!allowed.test(f.name))){hideLoadProgress();showStatus('❌ Pour les très gros fichiers, utilisez .xlsx ou .csv (pas .xls).',true);return;}
   try{
     _xlsxWorker=getXlsxWorker();
     _xlsxWorker.postMessage({type:'clear'});
-    let baseHdrs=null, totalRows=0;
-    const prepared=[];
+    let baseHdrs=null,totalRows=0; const prepared=[];
     for(let fi=0;fi<files.length;fi++){
       const file=files[fi];
-      const fileBase=5+(fi/files.length)*55;
-      setLoadProgress(fileBase,`Lecture ${fi+1}/${files.length} : ${file.name}`,'Chargement des fichiers');
+      setLoadProgress(5+(fi/files.length)*55,`Lecture ${fi+1}/${files.length} : ${file.name}`,'Lecture Excel par morceaux');
       await nextFrame();
-      const buffer=await new Promise((resolve,reject)=>{
-        const r=new FileReader();
-        r.onprogress=e=>{
-          if(e.lengthComputable){
-            const local=e.loaded/e.total;
-            setLoadProgress(fileBase+local*(25/files.length),`Lecture ${fi+1}/${files.length} : ${(e.loaded/1024/1024).toFixed(1)} / ${(e.total/1024/1024).toFixed(1)} Mo`,'Chargement des fichiers');
-          }
-        };
-        r.onload=()=>resolve(r.result); r.onerror=()=>reject(new Error('Impossible de lire '+file.name));
-        r.readAsArrayBuffer(file);
-      });
-      setLoadProgress(fileBase+28/files.length,`Analyse de ${file.name} dans un processus séparé…`,'Analyse du fichier');
-      await nextFrame();
-      const info=await prepareOneFileInWorker(file,buffer);
+      const info=await prepareOneFileInWorker(file);
       prepared.push(info); totalRows+=Number(info.rowCount||0);
       if(!baseHdrs) baseHdrs=info.headers;
-      else {
-        const norm=h=>String(h).normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().trim().replace(/[\s\-_\/]+/g,'');
-        const same=baseHdrs.length===info.headers.length && baseHdrs.every((h,i)=>norm(h)===norm(info.headers[i]));
+      else{
+        const norm=h=>String(h).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[\s\-_\/]+/g,'');
+        const same=baseHdrs.length===info.headers.length&&baseHdrs.every((h,i)=>norm(h)===norm(info.headers[i]));
         if(!same) throw new Error(`La structure de « ${file.name} » est différente du premier fichier.`);
       }
-      setLoadProgress(fileBase+50/files.length,`${fInt(totalRows)} lignes détectées dans ${fi+1}/${files.length} fichier(s)…`,'Préparation des données');
+      setLoadProgress(60+(fi/files.length)*8,`${fInt(totalRows)} lignes détectées — ${file.name}`,'Association des colonnes');
       await nextFrame();
     }
     if(!baseHdrs||!prepared.length){hideLoadProgress();showStatus('❌ Aucun fichier exploitable.',true);return;}
     _rawHdrs=baseHdrs; _rawRows=[];
-    setLoadProgress(68,`Fichier analysé. Association automatique des colonnes…`,'Préparation');
-    await nextFrame();
     buildColMap(_rawHdrs);
-    // Les données restent dans le Worker. On ne transfère surtout pas les 757k lignes d'un coup.
     window.__workerTotalRows=totalRows;
     window.__workerPreparedFiles=prepared;
-    setLoadProgress(100,`Colonnes détectées. Choisissez/validez l'association pour lancer le traitement complet.`,'Fichiers prêts');
+    setLoadProgress(100,'Colonnes détectées. Validez l’association pour lancer le traitement.','Fichiers prêts');
     setTimeout(hideLoadProgress,250);
   }catch(err){
-    hideLoadProgress();
-    showStatus('❌ Erreur : '+(err?.message||err),true);
-    console.error(err);
+    hideLoadProgress(); showStatus('❌ Erreur : '+(err?.message||err),true); console.error(err);
   }
 }
 
@@ -1854,7 +1957,7 @@ async function applyMapping(){
 
   document.getElementById('mapModal').classList.remove('show');
   const total=Number(window.__workerTotalRows||0);
-  setLoadProgress(2,`Ouverture du classeur et traitement par blocs de 30 000…`,'Importation des données');
+  setLoadProgress(2,`Lecture Excel par morceaux — traitement par blocs de 30 000…`,'Importation des données');
   await nextFrame();
 
   const cv=(row,k)=>idx[k]!==undefined&&idx[k]>=0?row[idx[k]]??'':'';
@@ -1876,7 +1979,9 @@ async function applyMapping(){
     const handler=ev=>{
       const d=ev.data||{};
       if(d.type==='progress'){
-        setLoadProgress(8, d.message||'Analyse du classeur…','Importation des données');
+        const b=Number(d.bytes||0), tb=Number(d.totalBytes||0);
+        const pp=tb?8+(b/tb)*50:8;
+        setLoadProgress(Math.min(58,pp), d.message||'Lecture Excel par morceaux…','Importation des données');
       }else if(d.type==='chunk'){
         const rows=d.records||[];
         for(let i=0;i<rows.length;i++){
@@ -1918,7 +2023,7 @@ async function applyMapping(){
     etatCod:[...new Set(newR.map(r=>r.ec).filter(Boolean))].sort(),
     statutColis:[...new Set(newR.map(r=>r.sc).filter(Boolean))].sort(),
   };
-  records.length=0; newR.forEach(r=>records.push(r)); Object.assign(meta,newMeta);
+  records = newR; Object.assign(meta,newMeta);
   weekSel.clear(); selDates.clear(); Object.values(F).forEach(s=>s.clear());
   document.querySelectorAll('.chip,.wchip').forEach(b=>b.classList.remove('on'));
   document.getElementById('villeFilter').value=''; document.getElementById('searchInp').value='';
