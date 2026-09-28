@@ -1509,13 +1509,50 @@ function getXlsxWorker(){
   if(_xlsxWorker) return _xlsxWorker;
   const workerCode = `
     self.importScripts('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
+    const normHeader = v => String(v ?? '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+      .toLowerCase().replace(/œ/g,'oe').replace(/æ/g,'ae')
+      .replace(/[^a-z0-9]+/g,'');
+    const HINTS = [
+      'date','datefacture','dateversement','semaine','week','montant','crbt','frais',
+      'montantenattente','statutdupaiement','etatcod','segment','tranchesderetard',
+      'codeclpr','codecl','numero','lignesdefacturereference','lignesdefacture',
+      'livreur','emplacementactuel','typedepartenaire','partenaire','colis',
+      'delai','creationlivreur','creationpr','livraisoncod','crbtpr','livraisonversement',
+      'statutcolis','flagnonverse','verse'
+    ];
+    function scoreHeader(row){
+      if(!Array.isArray(row)) return 0;
+      let score=0;
+      const seen=new Set();
+      for(const v of row){
+        const n=normHeader(v);
+        if(!n || n.length<2) continue;
+        for(const h of HINTS){
+          if(seen.has(h)) continue;
+          if(n===h){ score+=5; seen.add(h); break; }
+          if(n.includes(h) || h.includes(n)){ score+=1; break; }
+        }
+      }
+      return score;
+    }
     self.onmessage = function(ev){
       const data=ev.data||{};
       try{
         const wb=XLSX.read(data.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false});
-        const ws=wb.Sheets[wb.SheetNames[0]];
-        const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-        self.postMessage({type:'done', rows:raw});
+        let bestSheet=null, bestHeader=0, bestScore=-1;
+        for(const name of wb.SheetNames){
+          const ws=wb.Sheets[name];
+          // On cherche la vraie ligne d'en-tête dans les premières lignes.
+          const preview=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',range:0,blankrows:false}).slice(0,40);
+          for(let r=0;r<preview.length;r++){
+            const sc=scoreHeader(preview[r]);
+            if(sc>bestScore){ bestScore=sc; bestSheet=ws; bestHeader=r; }
+          }
+        }
+        if(!bestSheet) bestSheet=wb.Sheets[wb.SheetNames[0]];
+        const raw=XLSX.utils.sheet_to_json(bestSheet,{header:1,defval:'',range:bestHeader});
+        self.postMessage({type:'done', rows:raw, headerRow:bestHeader, headerScore:bestScore});
       }catch(err){
         self.postMessage({type:'error', message:err && err.message ? err.message : String(err)});
       }
@@ -1577,6 +1614,8 @@ async function parseFiles(files){
       await nextFrame();
 
       if(!raw||raw.length<2) continue;
+      // Le worker a déjà repéré la vraie ligne d'en-tête, même si le gros fichier
+      // contient des lignes de titre avant les colonnes.
       const hdrs=raw[0].map(v=>String(v??''));
       if(!baseHdrs){
         baseHdrs=hdrs;
@@ -1585,7 +1624,9 @@ async function parseFiles(files){
         const same=baseHdrs.length===hdrs.length && baseHdrs.every((h,i)=>norm(h)===norm(hdrs[i]));
         if(!same) throw new Error(`La structure de « ${file.name} » est différente du premier fichier.`);
       }
-      allRows.push(...raw.slice(1));
+      // Évite le spread (...rows) sur les très gros fichiers : cela peut faire
+      // planter le navigateur avec plusieurs centaines de milliers de lignes.
+      for(let ri=1;ri<raw.length;ri++) allRows.push(raw[ri]);
       setLoadProgress(8+((fi+1)/files.length)*68,`${fInt(allRows.length)} lignes chargées…`,'Préparation des données');
       await nextFrame();
     }
