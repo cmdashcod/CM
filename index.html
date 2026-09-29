@@ -211,6 +211,15 @@
     .up-status{display:none;font-size:10px;font-weight:600;color:rgba(255,255,255,.8);padding:7px;border-radius:7px;background:rgba(255,255,255,.09);line-height:1.4;word-break:break-word}
     .up-status.show{display:block}
     .up-status.err{background:rgba(217,79,74,.2);color:#ffb3ae}
+    .load-overlay{position:fixed;inset:0;z-index:99999;background:rgba(7,20,27,.72);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
+    .load-overlay.show{display:flex}
+    .load-box{width:min(460px,94vw);background:#fff;border-radius:16px;padding:22px 22px 18px;box-shadow:0 20px 70px rgba(0,0,0,.3);font-family:Cairo,sans-serif}
+    .load-title{font-size:16px;font-weight:900;color:#17323a;margin-bottom:6px}
+    .load-text{font-size:12px;color:#60717a;line-height:1.5;min-height:36px}
+    .load-track{height:12px;background:#e9eef1;border-radius:99px;overflow:hidden;margin-top:15px}
+    .load-bar{height:100%;width:0%;background:linear-gradient(90deg,#008996,#f5c200);transition:width .18s ease;border-radius:99px}
+    .load-pct{font-size:12px;font-weight:900;color:#17323a;text-align:right;margin-top:7px}
+    .load-note{font-size:10px;color:#87949a;margin-top:8px}
 
     /* CONTENT */
     .content{padding:14px 16px;display:flex;flex-direction:column;gap:14px;min-width:0;max-width:100%;overflow-x:hidden}
@@ -321,6 +330,21 @@
     .cod-val{font-size:22px;font-weight:900;color:var(--txt)}
     .cod-lbl{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-top:2px}
     .cod-sub{font-size:11px;font-weight:700;margin-top:4px}
+
+    /* UPLOAD CHOOSER */
+    .upload-box{background:var(--modal-bg);border-radius:18px;padding:24px;max-width:560px;width:94%;box-shadow:0 24px 64px rgba(0,0,0,.5);color:var(--txt)}
+    .upload-ttl{font-size:17px;font-weight:900;color:var(--pin-ttl);margin-bottom:5px}
+    .upload-sub{font-size:11px;color:var(--txt2);line-height:1.5;margin-bottom:14px}
+    .drop-zone{border:2px dashed var(--accent);border-radius:14px;padding:30px 18px;text-align:center;background:rgba(0,137,150,.045);cursor:pointer;transition:.18s}
+    .drop-zone:hover,.drop-zone.drag{background:rgba(0,137,150,.11);transform:translateY(-1px)}
+    .drop-ico{font-size:34px;margin-bottom:7px}.drop-main{font-size:14px;font-weight:900;color:var(--txt)}
+    .drop-help{font-size:11px;color:var(--txt2);margin-top:5px}
+    .upload-list{display:none;max-height:150px;overflow:auto;margin-top:12px;border:1px solid var(--line);border-radius:9px;padding:8px}
+    .upload-list.show{display:block}.upload-item{font-size:11px;padding:5px 7px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
+    .upload-item:last-child{border-bottom:0}.upload-count{font-weight:800;color:var(--accent)}
+    .upload-acts{display:flex;gap:8px;margin-top:14px}.upload-acts button{flex:1;height:38px;border:0;border-radius:8px;cursor:pointer;font-weight:800;font-family:'Cairo',sans-serif}
+    .btn-upload-cancel{background:var(--modal-cancel-bg);color:var(--txt2)}.btn-upload-ok{background:var(--accent);color:#fff}
+    .btn-upload-ok:disabled{opacity:.45;cursor:not-allowed}
 
     /* PIN MODAL */
     .modal-bg{display:none;position:fixed;inset:0;background:rgba(10,30,40,.62);z-index:500;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
@@ -493,6 +517,24 @@
 </head>
 <body>
 
+<!-- UPLOAD CHOOSER -->
+<div class="modal-bg" id="uploadModal">
+  <div class="upload-box">
+    <div class="upload-ttl">📂 Importer des données</div>
+    <div class="upload-sub">Choisissez un seul fichier ou déposez plusieurs fichiers Excel/CSV en une seule fois. Les fichiers doivent avoir la même structure de colonnes.</div>
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-ico">⬆️</div>
+      <div class="drop-main">Glissez-déposez vos fichiers ici</div>
+      <div class="drop-help">ou cliquez pour sélectionner 1 ou plusieurs fichiers</div>
+    </div>
+    <div class="upload-list" id="uploadList"></div>
+    <div class="upload-acts">
+      <button class="btn-upload-cancel" id="uploadCancel">Annuler</button>
+      <button class="btn-upload-ok" id="uploadContinue" disabled>Continuer</button>
+    </div>
+  </div>
+</div>
+
 <!-- PIN MODAL -->
 <div class="modal-bg" id="pinModal">
   <div class="pin-box">
@@ -505,6 +547,17 @@
       <button class="btn-pin-cancel" id="pinCancel">Annuler</button>
       <button class="btn-pin-ok" id="pinOk">Valider</button>
     </div>
+  </div>
+</div>
+
+<!-- FILE LOADING OVERLAY -->
+<div class="load-overlay" id="loadOverlay" aria-live="polite">
+  <div class="load-box">
+    <div class="load-title" id="loadTitle">Chargement du fichier…</div>
+    <div class="load-text" id="loadText">Préparation du fichier.</div>
+    <div class="load-track"><div class="load-bar" id="loadBar"></div></div>
+    <div class="load-pct" id="loadPct">0 %</div>
+    <div class="load-note">Ne fermez pas l’onglet pendant le traitement.</div>
   </div>
 </div>
 
@@ -558,7 +611,7 @@
     </div>
   </div>
 </header>
-<input type="file" id="fileInp" accept=".xlsx,.xls,.csv" style="display:none"/>
+<input type="file" id="fileInp" accept=".xlsx,.xls,.csv" multiple style="display:none"/>
 
 <!-- MAIN LAYOUT -->
 <div class="layout" id="mainLayout">
@@ -1297,7 +1350,7 @@ function exportCSV(data){
 
 /* ════════════ UPLOAD / PIN / COLMAP ════════════ */
 const PIN='CMGPL';
-let _pendingFile=null, _rawHdrs=[], _rawRows=[];
+let _pendingFile=null, _pendingFiles=[], _rawHdrs=[], _rawRows=[];
 let _pinMode='upload'; // 'upload' ou 'admin'
 const FIELD_DEFS=[
   {key:'d',  label:'Date (facture / versement)', req:true,  hints:['=date','=créé le','=cree le','date création','date_création','datecreation','date cr','datecr','date_cr']},
@@ -1332,18 +1385,60 @@ function showStatus(msg,isErr=false){
 
 const fileInp = document.getElementById('fileInp');
 const importBtn = document.getElementById('importBtn');
+const uploadModal = document.getElementById('uploadModal');
+const dropZone = document.getElementById('dropZone');
+const uploadList = document.getElementById('uploadList');
+const uploadContinue = document.getElementById('uploadContinue');
+let _selectedFiles=[];
 
 function openPicker(){
   const fi = document.getElementById('fileInp');
   if(!fi) return;
   fi.disabled = false;
+  fi.value='';
   fi.click();
 }
-if(importBtn) importBtn.addEventListener('click', e=>{ e.stopPropagation(); openPicker(); });
-if(fileInp) fileInp.addEventListener('change', e=>{ const f=e.target.files[0]; if(f){e.target.value=''; openPin(f);} });
+function showUploadChooser(){
+  _selectedFiles=[];
+  renderSelectedFiles();
+  uploadModal.classList.add('show');
+}
+function renderSelectedFiles(){
+  if(!_selectedFiles.length){
+    uploadList.classList.remove('show');
+    uploadList.innerHTML='';
+    uploadContinue.disabled=true;
+    return;
+  }
+  uploadList.innerHTML='<div class="upload-count">'+_selectedFiles.length+' fichier(s) sélectionné(s)</div>'+_selectedFiles.map(f=>`<div class="upload-item"><span>📄 ${esc(f.name)}</span><span>${(f.size/1024/1024).toFixed(1)} Mo</span></div>`).join('');
+  uploadList.classList.add('show');
+  uploadContinue.disabled=false;
+}
+function acceptFiles(fileList){
+  const files=Array.from(fileList||[]).filter(f=>/\.(xlsx|xls|csv)$/i.test(f.name));
+  if(!files.length){showStatus('❌ Aucun fichier Excel/CSV valide.',true);return;}
+  _selectedFiles=files;
+  renderSelectedFiles();
+}
+if(importBtn) importBtn.addEventListener('click', e=>{ e.stopPropagation(); showUploadChooser(); });
+if(dropZone){
+  dropZone.addEventListener('click',openPicker);
+  ['dragenter','dragover'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();e.stopPropagation();dropZone.classList.add('drag');}));
+  ['dragleave','drop'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();e.stopPropagation();dropZone.classList.remove('drag');}));
+  dropZone.addEventListener('drop',e=>acceptFiles(e.dataTransfer.files));
+}
+if(fileInp) fileInp.addEventListener('change', e=>{ acceptFiles(e.target.files); e.target.value=''; });
+document.getElementById('uploadCancel').addEventListener('click',()=>uploadModal.classList.remove('show'));
+uploadContinue.addEventListener('click',()=>{
+  if(!_selectedFiles.length)return;
+  const files=_selectedFiles.slice();
+  uploadModal.classList.remove('show');
+  openPin(files);
+});
 
-function openPin(file){
-  _pendingFile=file;
+function openPin(files){
+  _pendingFile=files.length===1 ? files[0] : {name:files.map(f=>f.name).join(', ')};
+  _pendingFiles=files;
   _pinMode='upload';
   document.getElementById('pinInp').value='';
   document.getElementById('pinErr').textContent='';
@@ -1364,17 +1459,42 @@ document.getElementById('pinInp').addEventListener('keydown',e=>{if(e.key==='Ent
 document.getElementById('pinCancel').addEventListener('click',()=>{
   document.getElementById('pinModal').classList.remove('show');
   _pendingFile=null;
+  _pendingFiles=[];
   _pinMode='upload';
 });
 
-function validatePin(){
+function setLoadProgress(percent,text,title){
+  const ov=document.getElementById('loadOverlay');
+  const bar=document.getElementById('loadBar');
+  const pct=document.getElementById('loadPct');
+  const tx=document.getElementById('loadText');
+  const tt=document.getElementById('loadTitle');
+  if(ov) ov.classList.add('show');
+  const p=Math.max(0,Math.min(100,Number(percent)||0));
+  if(bar) bar.style.width=p+'%';
+  if(pct) pct.textContent=Math.round(p)+' %';
+  if(tx&&text) tx.textContent=text;
+  if(tt&&title) tt.textContent=title;
+}
+function hideLoadProgress(){
+  const ov=document.getElementById('loadOverlay');
+  if(ov) ov.classList.remove('show');
+}
+function nextFrame(){return new Promise(resolve=>requestAnimationFrame(()=>resolve()));}
+
+async function validatePin(){
   if(document.getElementById('pinInp').value===PIN){
     document.getElementById('pinModal').classList.remove('show');
     if(_pendingFile){
-      parseFile(_pendingFile);
+      const files=_pendingFiles.slice();
+      const names=files.map(f=>f.name).join(', ');
+      _pinMode='upload';
+      setLoadProgress(2,`Lecture de ${files.length} fichier(s)…`,'Chargement des fichiers');
+      await nextFrame();
+      parseFiles(files);
+    }else{
+      _pinMode='upload';
     }
-    _pendingFile=null;
-    _pinMode='upload';
   } else {
     const inp=document.getElementById('pinInp');
     inp.classList.add('err-shake');
@@ -1383,41 +1503,299 @@ function validatePin(){
   }
 }
 
-function parseFile(file){
-  const ext=file.name.split('.').pop().toLowerCase();
-  if(!['xlsx','xls','csv'].includes(ext)){showStatus('❌ Format non supporté.',true);return;}
-  const r=new FileReader();
-  r.onload=e=>{
-    try{
-      const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
-      const ws=wb.Sheets[wb.SheetNames[0]];
-      const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-      if(!raw||raw.length<2){showStatus('❌ Fichier vide.',true);return;}
-      _rawHdrs=raw[0].map(String); _rawRows=raw.slice(1);
-      buildColMap(_rawHdrs);
-    }catch(err){showStatus('❌ Erreur : '+err.message,true);}
-  };
-  r.onerror=()=>showStatus('❌ Impossible de lire le fichier.',true);
-  r.readAsArrayBuffer(file);
+let _xlsxWorker=null;
+
+function getXlsxWorker(){
+  if(_xlsxWorker) return _xlsxWorker;
+  const workerCode = `
+    self.importScripts('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
+    const HINTS = [
+      'date','datefacture','dateversement','semaine','week','montant','crbt','frais',
+      'montantenattente','statutdupaiement','etatcod','segment','tranchesderetard',
+      'codeclpr','codecl','numero','lignesdefacturereference','lignesdefacture',
+      'livreur','emplacementactuel','typedepartenaire','partenaire','colis',
+      'delai','creationlivreur','creationpr','livraisoncod','crbtpr','livraisonversement',
+      'statutcolis','flagnonverse','verse'
+    ];
+    const normHeader = v => String(v ?? '')
+      .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')
+      .toLowerCase().replace(/œ/g,'oe').replace(/æ/g,'ae')
+      .replace(/[^a-z0-9]+/g,'');
+    function scoreHeader(row){
+      if(!Array.isArray(row)) return 0;
+      let score=0;
+      const seen=new Set();
+      for(const v of row){
+        const n=normHeader(v);
+        if(!n || n.length<2) continue;
+        for(const h of HINTS){
+          if(seen.has(h)) continue;
+          if(n===h){ score+=5; seen.add(h); break; }
+          if(n.includes(h) || h.includes(n)){ score+=1; break; }
+        }
+      }
+      return score;
+    }
+    const files=[];
+    let processing=false;
+    self.onmessage = function(ev){
+      const data=ev.data||{};
+      try{
+        if(data.type==='prepare'){
+          // IMPORTANT : ne pas analyser les 757k lignes ici. On ne lit qu'un petit
+          // échantillon pour trouver la feuille et l'en-tête. Le classeur complet
+          // sera analysé uniquement après que l'utilisateur a validé l'association.
+          const wb=XLSX.read(data.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false,dense:true,sheetRows:200});
+          let best=null,bestHeader=0,bestScore=-1,bestName='';
+          for(const name of wb.SheetNames){
+            const ws=wb.Sheets[name];
+            if(!ws) continue;
+            // Avec sheetRows + dense, SheetJS peut ne pas fournir !ref de façon
+            // fiable sur certains très gros XLSX. Pour la phase de préparation,
+            // on déduit donc la zone d'analyse directement des lignes chargées.
+            let rg=null;
+            const ref=ws['!ref'] || ws['!fullref'];
+            if(ref){
+              try{ rg=XLSX.utils.decode_range(ref); }catch(e){}
+            }
+            const rows=Array.isArray(ws) ? ws : null;
+            const scanRows=rows ? Math.min(rows.length,200) : 0;
+            const maxScan=rg ? Math.min(rg.e.r,199) : Math.max(0,scanRows-1);
+            const startCol=rg ? rg.s.c : 0;
+            let endCol=rg ? rg.e.c : 0;
+            if(rows){
+              for(let r=0;r<scanRows;r++) if(Array.isArray(rows[r])) endCol=Math.max(endCol,rows[r].length-1);
+            }
+            // Si la feuille n'est pas dense, on lit directement les cellules A1:...
+            // jusqu'à la largeur réellement rencontrée dans l'échantillon.
+            for(let r=0;r<=maxScan;r++){
+              const row=[];
+              for(let c=startCol;c<=endCol;c++){
+                let cell;
+                if(rows && Array.isArray(rows[r])) cell=rows[r][c];
+                else cell=ws[XLSX.utils.encode_cell({r,c})];
+                if(cell && typeof cell==='object' && 'v' in cell) cell=cell.v;
+                row.push(cell ?? '');
+              }
+              const sc=scoreHeader(row);
+              if(sc>bestScore){
+                const effectiveRg=rg || {s:{r:0,c:startCol},e:{r:maxScan,c:endCol}};
+                best={rg:effectiveRg}; bestHeader=r; bestScore=sc; bestName=name;
+              }
+            }
+          }
+          if(!best){
+            self.postMessage({type:'prepared',ok:false,message:'Impossible de lire les premières lignes de '+data.name+'. Le fichier Excel ne contient pas de feuille exploitable.'});
+            return;
+          }
+          const ws=wb.Sheets[bestName];
+          const rg=best.rg;
+          const denseRows=Array.isArray(ws) ? ws : null;
+          const headers=[];
+          for(let c=rg.s.c;c<=rg.e.c;c++){
+            let cell=denseRows && Array.isArray(denseRows[bestHeader]) ? denseRows[bestHeader][c] : ws[XLSX.utils.encode_cell({r:bestHeader,c})];
+            if(cell && typeof cell==='object' && 'v' in cell) cell=cell.v;
+            headers.push(cell == null ? '' : String(cell));
+          }
+          if(!headers.some(h=>String(h).trim())){
+            self.postMessage({type:'prepared',ok:false,message:'Aucun en-tête détecté dans '+data.name});
+            return;
+          }
+          // On conserve le buffer dans le Worker. Il ne retourne PAS à la page.
+          // Cela évite le transfert massif des centaines de milliers de cellules.
+          const state={
+            name:data.name, buffer:data.buffer, sheetName:bestName,
+            startCol:rg.s.c, endCol:rg.e.c, headerRow:bestHeader,
+            headers
+          };
+          const id=files.push(state)-1;
+          self.postMessage({type:'prepared',ok:true,id,headers,rowCount:0,sheet:bestName,headerRow:bestHeader,headerScore:bestScore});
+          return;
+        }
+        if(data.type==='process'){
+          if(processing) throw new Error('Un traitement est déjà en cours.');
+          processing=true;
+          const chunkSize=30000;
+          try{
+            let globalDone=0;
+            // Le parsing complet est différé jusqu'après l'association des colonnes.
+            // Le dashboard peut donc afficher l'association rapidement, sans attendre
+            // l'analyse de plusieurs centaines de milliers de lignes.
+            let total=0;
+            const full=[];
+            for(let fi=0;fi<files.length;fi++){
+              const f=files[fi];
+              const wb=XLSX.read(f.buffer,{type:'array',cellDates:true,cellNF:false,cellText:false,dense:true});
+              const ws=wb.Sheets[f.sheetName];
+              if(!ws) throw new Error('Feuille introuvable : '+f.sheetName);
+              const ref=ws['!ref'] || ws['!fullref'];
+              let rg;
+              if(ref){
+                rg=XLSX.utils.decode_range(ref);
+              }else if(Array.isArray(ws)){
+                rg={s:{r:0,c:f.startCol},e:{r:ws.length-1,c:f.endCol}};
+              }else{
+                throw new Error('La feuille '+f.sheetName+' ne fournit pas de plage de données.');
+              }
+              const lastRow=rg.e.r;
+              const rowCount=Math.max(0,lastRow-f.headerRow);
+              full.push({f,ws,rg,lastRow,rowCount});
+              total += rowCount;
+              self.postMessage({type:'progress',done:0,total,fileIndex:fi,fileName:f.name,message:'Classeur analysé : '+rowCount.toLocaleString()+' lignes détectées'});
+            }
+            for(let fi=0;fi<full.length;fi++){
+              const x=full[fi], f=x.f;
+              for(let start=f.headerRow+1; start<=x.lastRow; start+=chunkSize){
+                const end=Math.min(x.lastRow,start+chunkSize-1);
+                const rows=XLSX.utils.sheet_to_json(x.ws,{header:1,defval:'',blankrows:false,range:{s:{r:start,c:f.startCol},e:{r:end,c:f.endCol}}});
+                if(rows.length){
+                  globalDone += rows.length;
+                  self.postMessage({type:'chunk',fileIndex:fi,fileName:f.name,rows,done:globalDone,total});
+                }
+              }
+            }
+            self.postMessage({type:'processDone',total});
+          }finally{ processing=false; }
+          return;
+        }
+        if(data.type==='clear'){
+          files.length=0;
+          return;
+        }
+      }catch(err){
+        self.postMessage({type:'error',stage:data.type,message:err&&err.message?err.message:String(err)});
+        if(data.type==='process') processing=false;
+      }
+    };
+  `;
+  const blob=new Blob([workerCode],{type:'application/javascript'});
+  _xlsxWorker=new Worker(URL.createObjectURL(blob));
+  return _xlsxWorker;
+}
+
+function prepareOneFileInWorker(file,buffer){
+  return new Promise((resolve,reject)=>{
+    const worker=getXlsxWorker();
+    const handler=ev=>{
+      const d=ev.data||{};
+      if(d.type==='prepared'){
+        worker.removeEventListener('message',handler);
+        if(d.ok) resolve(d); else reject(new Error(d.message||'Impossible de préparer le fichier.'));
+      }else if(d.type==='error' && d.stage==='prepare'){
+        worker.removeEventListener('message',handler);
+        reject(new Error(d.message||'Erreur pendant l’analyse du fichier.'));
+      }
+    };
+    worker.addEventListener('message',handler);
+    try{ worker.postMessage({type:'prepare',name:file.name,buffer},[buffer]); }
+    catch(err){ worker.removeEventListener('message',handler); reject(err); }
+  });
+}
+
+async function parseFiles(files){
+  if(!files||!files.length){hideLoadProgress();return;}
+  const allowed=/\.(xlsx|xls|csv)$/i;
+  if(files.some(f=>!allowed.test(f.name))){hideLoadProgress();showStatus('❌ Un ou plusieurs fichiers ne sont pas au format Excel/CSV.',true);return;}
+  try{
+    _xlsxWorker=getXlsxWorker();
+    _xlsxWorker.postMessage({type:'clear'});
+    let baseHdrs=null, totalRows=0;
+    const prepared=[];
+    for(let fi=0;fi<files.length;fi++){
+      const file=files[fi];
+      const fileBase=5+(fi/files.length)*55;
+      setLoadProgress(fileBase,`Lecture ${fi+1}/${files.length} : ${file.name}`,'Chargement des fichiers');
+      await nextFrame();
+      const buffer=await new Promise((resolve,reject)=>{
+        const r=new FileReader();
+        r.onprogress=e=>{
+          if(e.lengthComputable){
+            const local=e.loaded/e.total;
+            setLoadProgress(fileBase+local*(25/files.length),`Lecture ${fi+1}/${files.length} : ${(e.loaded/1024/1024).toFixed(1)} / ${(e.total/1024/1024).toFixed(1)} Mo`,'Chargement des fichiers');
+          }
+        };
+        r.onload=()=>resolve(r.result); r.onerror=()=>reject(new Error('Impossible de lire '+file.name));
+        r.readAsArrayBuffer(file);
+      });
+      setLoadProgress(fileBase+28/files.length,`Analyse de ${file.name} dans un processus séparé…`,'Analyse du fichier');
+      await nextFrame();
+      const info=await prepareOneFileInWorker(file,buffer);
+      prepared.push(info); totalRows+=Number(info.rowCount||0);
+      if(!baseHdrs) baseHdrs=info.headers;
+      else {
+        const norm=h=>String(h).normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().trim().replace(/[\s\-_\/]+/g,'');
+        const same=baseHdrs.length===info.headers.length && baseHdrs.every((h,i)=>norm(h)===norm(info.headers[i]));
+        if(!same) throw new Error(`La structure de « ${file.name} » est différente du premier fichier.`);
+      }
+      setLoadProgress(fileBase+50/files.length,`${fInt(totalRows)} lignes détectées dans ${fi+1}/${files.length} fichier(s)…`,'Préparation des données');
+      await nextFrame();
+    }
+    if(!baseHdrs||!prepared.length){hideLoadProgress();showStatus('❌ Aucun fichier exploitable.',true);return;}
+    _rawHdrs=baseHdrs; _rawRows=[];
+    setLoadProgress(68,`Fichier analysé. Association automatique des colonnes…`,'Préparation');
+    await nextFrame();
+    buildColMap(_rawHdrs);
+    // Les données restent dans le Worker. On ne transfère surtout pas les 757k lignes d'un coup.
+    window.__workerTotalRows=totalRows;
+    window.__workerPreparedFiles=prepared;
+    setLoadProgress(100,`Colonnes détectées. Choisissez/validez l'association pour lancer le traitement complet.`,'Fichiers prêts');
+    setTimeout(hideLoadProgress,250);
+  }catch(err){
+    hideLoadProgress();
+    showStatus('❌ Erreur : '+(err?.message||err),true);
+    console.error(err);
+  }
+}
+
+function normalizeHeader(v){
+  return String(v??'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase()
+    .replace(/œ/g,'oe').replace(/æ/g,'ae')
+    .replace(/[^a-z0-9]+/g,'')
+    .trim();
 }
 
 function autoMap(hdrs){
-  const norm=h=>String(h).toLowerCase().replace(/[\s\-_\/]/g,'');
+  // Association automatique basée sur la logique d'origine du dashboard.
+  // On conserve aussi les associations mémorisées pour les fichiers réimportés.
+  const norm=h=>String(h ?? '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[\s\-_\/]+/g,'').trim();
   const normHdrs=hdrs.map(norm);
+  let saved={};
+  try{ saved=JSON.parse(localStorage.getItem('gpl_column_mapping')||'{}')||{}; }catch(e){ saved={}; }
   const m={};
+  const used=new Set();
+
   FIELD_DEFS.forEach(f=>{
-    let found='';
-    // On essaie chaque indice (du plus spécifique au plus générique) sur TOUS les
-    // en-têtes avant de passer à l'indice suivant, pour éviter qu'un indice générique
-    // (ex: "verse") ne capture par erreur une colonne destinée à un autre champ
-    // (ex: "Versement Livreur") simplement parce qu'elle apparaît plus tôt dans le fichier.
-    for(const hint of f.hints){
-      const exact=hint.startsWith('=');
-      const nh=norm(exact?hint.slice(1):hint);
-      const idx=normHdrs.findIndex(h=>exact?h===nh:h.includes(nh));
-      if(idx>=0){ found=hdrs[idx]; break; }
+    const hints=[];
+    if(saved[f.key]) hints.push('='+saved[f.key]);
+    hints.push(...f.hints);
+    hints.push(f.label);
+
+    let found=-1;
+    for(const hint of hints){
+      const exact=String(hint).startsWith('=');
+      const raw=exact ? String(hint).slice(1) : String(hint);
+      const nh=norm(raw);
+      if(!nh) continue;
+      // Correspondance exacte prioritaire.
+      for(let i=0;i<normHdrs.length;i++){
+        if(used.has(i)) continue;
+        if(normHdrs[i]===nh){ found=i; break; }
+      }
+      if(found>=0) break;
+      // Puis correspondance partielle comme dans la version d'origine.
+      if(!exact){
+        for(let i=0;i<normHdrs.length;i++){
+          if(used.has(i)) continue;
+          if(normHdrs[i].includes(nh)){ found=i; break; }
+        }
+      }
+      if(found>=0) break;
     }
-    m[f.key]=found;
+    if(found>=0){ m[f.key]=found; used.add(found); }
   });
   return m;
 }
@@ -1427,8 +1805,9 @@ function buildColMap(hdrs){
   const auto=autoMap(hdrs);
   FIELD_DEFS.forEach(f=>{
     const row=document.createElement('div'); row.className='map-row';
-    const opts=hdrs.map(h=>`<option value="${esc(h)}"${auto[f.key]===h?' selected':''}>${esc(h)}</option>`).join('');
-    row.innerHTML=`<label>${f.req?'⚡ ':''}${f.label}${f.req?' *':''}</label><select id="map_${f.key}"><option value="">— Non associé —</option>${opts}</select>`;
+    const selected=auto[f.key];
+    const opts=hdrs.map((h,i)=>`<option value="${i}"${selected===i?' selected':''}>${esc(h)}</option>`).join('');
+    row.innerHTML=`<label>${f.req?'⚡ ':''}${f.label}${f.req?' *':''}</label><select id="map_${f.key}"><option value="-1"${selected===undefined?' selected':''}>— Non associé —</option>${opts}</select>`;
     grid.appendChild(row);
   });
   document.getElementById('mapModal').classList.add('show');
@@ -1439,9 +1818,21 @@ document.getElementById('mapCancel').addEventListener('click',()=>document.getEl
 
 async function applyMapping(){
   const idx={};
-  FIELD_DEFS.forEach(f=>{ const v=document.getElementById('map_'+f.key)?.value||''; if(v)idx[f.key]=_rawHdrs.indexOf(v); });
+  const savedMapping={};
+  FIELD_DEFS.forEach(f=>{
+    const v=document.getElementById('map_'+f.key)?.value ?? '-1';
+    const n=Number(v);
+    if(Number.isInteger(n) && n>=0 && n<_rawHdrs.length){ idx[f.key]=n; savedMapping[f.key]=_rawHdrs[n]; }
+  });
+  try{ localStorage.setItem('gpl_column_mapping',JSON.stringify(savedMapping)); }catch(e){}
   const missing=FIELD_DEFS.filter(f=>f.req&&(idx[f.key]===undefined||idx[f.key]<0)).map(f=>f.label);
   if(missing.length){showStatus('❌ Champs requis manquants : '+missing.join(', '),true);return;}
+
+  document.getElementById('mapModal').classList.remove('show');
+  const total=Number(window.__workerTotalRows||0);
+  setLoadProgress(2,`Ouverture du classeur et traitement par blocs de 30 000…`,'Importation des données');
+  await nextFrame();
+
   const cv=(row,k)=>idx[k]!==undefined&&idx[k]>=0?row[idx[k]]??'':'';
   const ymd=dt=>{ const t=new Date(dt.getTime()+12*3600e3); return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0'); };
   const toDate=v=>{ if(!v)return''; if(v instanceof Date)return ymd(v); const s=String(v).trim(); if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10); const d=new Date(s); return isNaN(d)?s:ymd(d); };
@@ -1451,19 +1842,49 @@ async function applyMapping(){
     let s=String(v).trim().replace(/\u00a0/g,' ').replace(/\s/g,'');
     if(s.includes(',') && s.includes('.')) s=s.replace(/\./g,'').replace(',','.');
     else if(s.includes(',')) s=s.replace(',','.');
-    const n=Number(s);
-    return Number.isFinite(n)?n:0;
+    const n=Number(s); return Number.isFinite(n)?n:0;
   };
-  const newR=_rawRows.filter(r=>r.some(c=>c!=='')).map(r=>({
-    d:toDate(cv(r,'d')), w:String(cv(r,'w')), crbt:sf(cv(r,'crbt')), fr:sf(cv(r,'fr')), p:sf(cv(r,'p')),
-    sp:String(cv(r,'sp')), ec:String(cv(r,'ec')), s:String(cv(r,'s')), t:String(cv(r,'t')),
-    c:String(cv(r,'c')), n:String(cv(r,'n')), lf:String(cv(r,'lf')), lr:String(cv(r,'lr')), v:String(cv(r,'v')), ca:String(cv(r,'ca')), co:String(cv(r,'co')),
-    a1:sf(cv(r,'a1')), a2:sf(cv(r,'a2')), a3:sf(cv(r,'a3')), a4:sf(cv(r,'a4')), a5:sf(cv(r,'a5')),
-    sc:String(cv(r,'sc')), fv:String(cv(r,'fv')),
-  }));
+
+  const newR=[];
+  let processed=0;
+  const worker=getXlsxWorker();
+  await new Promise((resolve,reject)=>{
+    const handler=ev=>{
+      const d=ev.data||{};
+      if(d.type==='progress'){
+        setLoadProgress(8, d.message||'Analyse du classeur…','Importation des données');
+      }else if(d.type==='chunk'){
+        const rows=d.rows||[];
+        for(let i=0;i<rows.length;i++){
+          const r=rows[i];
+          newR.push({
+            d:toDate(cv(r,'d')), w:String(cv(r,'w')), crbt:sf(cv(r,'crbt')), fr:sf(cv(r,'fr')), p:sf(cv(r,'p')),
+            sp:String(cv(r,'sp')), ec:String(cv(r,'ec')), s:String(cv(r,'s')), t:String(cv(r,'t')),
+            c:String(cv(r,'c')), n:String(cv(r,'n')), lf:String(cv(r,'lf')), lr:String(cv(r,'lr')), v:String(cv(r,'v')), ca:String(cv(r,'ca')), co:String(cv(r,'co')),
+            a1:sf(cv(r,'a1')), a2:sf(cv(r,'a2')), a3:sf(cv(r,'a3')), a4:sf(cv(r,'a4')), a5:sf(cv(r,'a5')),
+            sc:String(cv(r,'sc')), fv:String(cv(r,'fv'))
+          });
+        }
+        processed=d.done||newR.length;
+        const workerTotal=Number(d.total||total||0);
+        setLoadProgress(8+(processed/Math.max(1,workerTotal))*55,`Traitement : ${fInt(processed)} / ${fInt(workerTotal)} lignes…`,'Importation des données');
+      }else if(d.type==='processDone'){
+        worker.removeEventListener('message',handler); resolve();
+      }else if(d.type==='error' && d.stage==='process'){
+        worker.removeEventListener('message',handler); reject(new Error(d.message||'Erreur pendant le traitement.'));
+      }
+    };
+    worker.addEventListener('message',handler);
+    try{ worker.postMessage({type:'process'}); }
+    catch(err){ worker.removeEventListener('message',handler); reject(err); }
+  });
+
+  _rawRows=[];
+  setLoadProgress(64,'Calcul des filtres et des statistiques…','Finalisation');
+  await nextFrame();
   const dates=newR.map(r=>r.d).filter(Boolean).sort();
   const newMeta={
-    sourceFile:_pendingFile?.name||'Fichier importé', rowCount:newR.length,
+    sourceFile:_pendingFiles.length>1?_pendingFiles.map(f=>f.name).join(', '):(_pendingFile?.name||'Fichier importé'), rowCount:newR.length,
     dateMin:dates[0]||'', dateMax:dates[dates.length-1]||'',
     weeks:[...new Set(newR.map(r=>r.w).filter(Boolean))].sort(),
     cities:[...new Set(newR.map(r=>r.v).filter(Boolean))].sort(),
@@ -1478,15 +1899,16 @@ async function applyMapping(){
   document.querySelectorAll('.chip,.wchip').forEach(b=>b.classList.remove('on'));
   document.getElementById('villeFilter').value=''; document.getElementById('searchInp').value='';
   populateFilters(); updateMeta(); renderDateTags(); refresh();
-  document.getElementById('mapModal').classList.remove('show');
   const importedCRBT = newR.reduce((sum,r)=>sum+Number(r.crbt||0),0);
   const crbtColumnName = idx.crbt!==undefined ? _rawHdrs[idx.crbt] : 'Non associée';
   showStatus(`✅ ${fInt(newR.length)} lignes chargées — CRBT depuis "${crbtColumnName}" : ${fCur(importedCRBT)} — "${newMeta.sourceFile}"`);
   const savedAt=new Date().toLocaleString('fr-FR');
   lockUpload(savedAt);
-  // Sauvegarde GitHub automatique après l'association des colonnes.
-  // Si un token existe déjà dans la session, aucun écran supplémentaire n'est affiché.
-  setTimeout(()=>saveCurrentDataToGitHub(),120);
+  setLoadProgress(72,`Import terminé. Sauvegarde automatique de ${fInt(records.length)} lignes…`,'Sauvegarde GitHub');
+  await nextFrame();
+  const ok=await saveCurrentDataToGitHub();
+  setLoadProgress(ok?100:72,ok?'Sauvegarde terminée.':'Les données sont chargées, mais la sauvegarde GitHub a échoué.','Terminé');
+  setTimeout(hideLoadProgress,ok?500:1200);
 }
 
 function lockUpload(savedAt){
@@ -1510,7 +1932,7 @@ document.getElementById('unlockBtn').addEventListener('click', unlockImport);
 
 /* ════════════ GITHUB — DATA SPLIT LARGE VOLUME ════════════
    - Supporte de très gros volumes (jusqu'à plusieurs centaines de milliers de lignes).
-   - Découpe automatiquement les données en fichiers JSON d'environ 900 Ko.
+   - Découpe automatiquement les données en fichiers JSON de 30 000 lignes maximum pour accélérer le chargement.
    - Sauvegarde les morceaux via Git Blobs + Tree + un seul commit.
    - Le dashboard recharge data_manifest.json puis tous les morceaux.
    - Le token est demandé uniquement au moment de la première sauvegarde après association.
@@ -1521,7 +1943,7 @@ const GH_BRANCH='main';
 const GH_API_BASE='https://api.github.com';
 const GH_MANIFEST_PATH='data_manifest.json';
 const GH_PART_PREFIX='data';
-const GH_PART_TARGET_BYTES=900*1024;
+const GH_PART_MAX_ROWS=30000;
 const GH_TOKEN_KEY='cmdash_github_token';
 
 function getGitHubToken(){ return (localStorage.getItem(GH_TOKEN_KEY)||'').trim(); }
@@ -1568,16 +1990,15 @@ async function requestGitHubToken(){
 }
 function makeParts(payload){
   const records=payload.records||[];
-  const parts=[]; let current=[]; let currentBytes=0;
-  for(const row of records){
-    const rowText=JSON.stringify(row); const rowBytes=new TextEncoder().encode(rowText).length+2;
-    if(current.length && currentBytes+rowBytes>GH_PART_TARGET_BYTES){ parts.push(current); current=[]; currentBytes=0; }
-    current.push(row); currentBytes+=rowBytes;
+  const parts=[];
+  for(let i=0;i<records.length;i+=GH_PART_MAX_ROWS){
+    parts.push(records.slice(i,i+GH_PART_MAX_ROWS));
   }
-  if(current.length || !parts.length) parts.push(current);
+  if(!parts.length) parts.push([]);
   const total=parts.length;
   return parts.map((rows,i)=>({
-    meta:i===0?payload.meta:{}, savedAt:payload.savedAt, part:i+1, parts:total, records:rows
+    meta:i===0?payload.meta:{}, savedAt:payload.savedAt, part:i+1, parts:total,
+    fromRow:i*GH_PART_MAX_ROWS+1, toRow:i*GH_PART_MAX_ROWS+rows.length, records:rows
   }));
 }
 async function getHeadTree(token){
@@ -1612,18 +2033,23 @@ async function saveCurrentDataToGitHub(){
     for(let i=0;i<parts.length;i++){
       const json=JSON.stringify(parts[i]);
       const size=new TextEncoder().encode(json).length;
+      const savePct=74+(i/parts.length)*20;
+      setLoadProgress(savePct,`Envoi GitHub : fichier ${i+1}/${parts.length} — ${(size/1024).toFixed(0)} Ko`,'Sauvegarde GitHub');
       showStatus(`☁️ Préparation fichier ${i+1}/${parts.length} — ${(size/1024).toFixed(0)} Ko`);
+      await nextFrame();
       const blob=await createBlob(token,json);
       entries.push({path:names[i],mode:'100644',type:'blob',sha:blob.sha});
     }
     if(old?.files){ for(const oldName of old.files){ if(!names.includes(oldName)) entries.push({path:oldName,mode:'100644',type:'blob',sha:null}); } }
-    const manifest={version:2,parts:parts.length,files:names,rowCount:records.length,savedAt:payload.savedAt,partTargetBytes:GH_PART_TARGET_BYTES};
+    const manifest={version:2,parts:parts.length,files:names,rowCount:records.length,savedAt:payload.savedAt,rowsPerFile:GH_PART_MAX_ROWS};
     const mb=await createBlob(token,JSON.stringify(manifest));
     entries.push({path:GH_MANIFEST_PATH,mode:'100644',type:'blob',sha:mb.sha});
+    setLoadProgress(95,'Création du commit GitHub…','Sauvegarde GitHub');
     showStatus('☁️ Création du commit GitHub…');
     const tree=await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/trees`,{method:'POST',headers:ghHeaders(token),body:JSON.stringify({base_tree:head.treeSha,tree:entries})});
     const commit=await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/commits`,{method:'POST',headers:ghHeaders(token),body:JSON.stringify({message:`Update data split (${parts.length} fichiers)`,tree:tree.sha,parents:[head.commitSha]})});
     await ghJson(`${GH_API_BASE}/repos/${GH_OWNER}/${GH_REPO}/git/refs/heads/${encodeURIComponent(GH_BRANCH)}`,{method:'PATCH',headers:ghHeaders(token),body:JSON.stringify({sha:commit.sha,force:false})});
+    setLoadProgress(99,'Finalisation de la sauvegarde…','Sauvegarde GitHub');
     showStatus(`☁️✅ Sauvegarde GitHub terminée — ${fInt(records.length)} lignes / ${parts.length} fichiers`);
     return true;
   }catch(e){
@@ -1640,11 +2066,18 @@ async function loadFromDataJson(){
     const mr=await fetch('./'+GH_MANIFEST_PATH+'?ts='+Date.now(),{cache:'no-store'});
     if(mr.ok) manifest=await mr.json();
     const files=manifest?.files?.length?manifest.files:['data.json'];
+    const responses=await Promise.all(files.map(async file=>{
+      const r=await fetch('./'+file+'?ts='+Date.now(),{cache:'no-store'});
+      if(!r.ok) throw new Error(file+' HTTP '+r.status);
+      const p=await r.json();
+      if(!Array.isArray(p.records)) throw new Error(file+' invalide');
+      return p;
+    }));
     const all=[]; let firstMeta={}; let savedAt='';
-    for(const file of files){
-      const r=await fetch('./'+file+'?ts='+Date.now(),{cache:'no-store'}); if(!r.ok) throw new Error(file+' HTTP '+r.status);
-      const p=await r.json(); if(!Array.isArray(p.records)) throw new Error(file+' invalide');
-      all.push(...p.records); if(p.meta&&Object.keys(p.meta).length) firstMeta=p.meta; savedAt=p.savedAt||savedAt;
+    for(const p of responses){
+      all.push(...p.records);
+      if(p.meta&&Object.keys(p.meta).length) firstMeta=p.meta;
+      savedAt=p.savedAt||savedAt;
     }
     records.length=0; all.forEach(r=>records.push(r)); Object.assign(meta,firstMeta);
     populateFilters(); updateMeta(); refresh();
