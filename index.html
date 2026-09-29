@@ -7,7 +7,26 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link rel="preconnect" href="https://cdn.jsdelivr.net"/>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js">
+/* GitHub token modal controls */
+(function(){
+  const inp=document.getElementById('ghTokenInp');
+  const ok=document.getElementById('ghTokenOk');
+  const cancel=document.getElementById('ghTokenCancel');
+  if(!inp||!ok||!cancel) return;
+  ok.addEventListener('click',()=>{
+    const v=inp.value.trim();
+    if(!v){ const e=document.getElementById('ghTokenErr'); if(e)e.textContent='Entrez votre token GitHub.'; inp.focus(); return; }
+    closeGitHubTokenModal(v);
+  });
+  cancel.addEventListener('click',()=>closeGitHubTokenModal(null));
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter') ok.click();
+    if(e.key==='Escape') cancel.click();
+  });
+})();
+
+</script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
   <style>
@@ -211,8 +230,8 @@
     .up-status{display:none;font-size:10px;font-weight:600;color:rgba(255,255,255,.8);padding:7px;border-radius:7px;background:rgba(255,255,255,.09);line-height:1.4;word-break:break-word}
     .up-status.show{display:block}
     .up-status.err{background:rgba(217,79,74,.2);color:#ffb3ae}
-    .load-overlay{display:none !important;position:fixed;inset:0;z-index:99999;background:rgba(7,20,27,.72);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
-    .load-overlay.show{display:none !important}
+    .load-overlay{display:none !important;position:fixed;inset:0;z-index:99999;background:rgba(7,20,27,.72);backdrop-filter:blur(3px);align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
+    .load-overlay.show{display:flex}
     .load-box{width:min(460px,94vw);background:#fff;border-radius:16px;padding:22px 22px 18px;box-shadow:0 20px 70px rgba(0,0,0,.3);font-family:Cairo,sans-serif}
     .load-title{font-size:16px;font-weight:900;color:#17323a;margin-bottom:6px}
     .load-text{font-size:12px;color:#60717a;line-height:1.5;min-height:36px}
@@ -513,7 +532,23 @@
     .gh-ttl{font-size:20px;font-weight:900;margin-bottom:6px}.gh-sub{font-size:13px;line-height:1.5;opacity:.78;margin-bottom:16px}
     .gh-field{display:flex;flex-direction:column;gap:6px;margin:10px 0}.gh-field label{font-size:12px;font-weight:800}.gh-field input{height:42px;border:1px solid var(--line,#d7dce3);border-radius:9px;padding:0 11px;font-size:14px;background:var(--bg,#fff);color:var(--text,#18202a);box-sizing:border-box}
     .gh-note{font-size:11px;line-height:1.45;opacity:.7;margin-top:10px}.gh-err{min-height:18px;color:#d33;font-size:12px;font-weight:700;margin-top:8px}.gh-btns{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.gh-cancel,.gh-ok{border:0;border-radius:9px;padding:10px 15px;font-weight:800;cursor:pointer}.gh-cancel{background:#e9edf2;color:#20252b}.gh-ok{background:#238636;color:#fff}.gh-save-mini{background:#238636;color:#fff;border:0;border-radius:8px;padding:7px 10px;font-weight:800;cursor:pointer}
-  </style>
+  
+/* GitHub token modal: stays inside the page when switching browser tabs. */
+.gh-token-modal{position:fixed;inset:0;z-index:10050;display:none;align-items:center;justify-content:center;background:rgba(10,18,24,.68);backdrop-filter:blur(3px);padding:20px;box-sizing:border-box}
+.gh-token-modal.show{display:flex}
+.gh-token-box{width:min(450px,calc(100vw - 40px));background:var(--panel,#fff);color:var(--txt,#17313a);border:1px solid rgba(255,255,255,.18);border-radius:16px;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.35);box-sizing:border-box}
+.gh-token-title{font-size:17px;font-weight:900;margin-bottom:14px}
+.gh-token-sub{font-size:13px;line-height:1.55;margin-bottom:12px}
+.gh-token-note{font-size:12px;color:var(--muted,#71828a);margin-bottom:12px}
+.gh-token-input{width:100%;height:42px;border-radius:10px;border:1px solid #9aa9b3;background:transparent;color:inherit;padding:0 12px;font-size:14px;outline:none;box-sizing:border-box}
+.gh-token-input:focus{border-color:#6b7ff2;box-shadow:0 0 0 3px rgba(107,127,242,.16)}
+.gh-token-err{min-height:20px;color:#d94f4a;font-size:12px;font-weight:700;padding-top:7px}
+.gh-token-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:5px}
+.gh-token-actions button{height:38px;padding:0 18px;border-radius:10px;border:0;cursor:pointer;font-weight:800}
+.gh-token-cancel{background:#334b88;color:#fff}
+.gh-token-ok{background:#b8c5ff;color:#15233d}
+
+</style>
 </head>
 <body>
 
@@ -550,6 +585,21 @@
   </div>
 </div>
 
+<!-- GITHUB TOKEN MODAL -->
+<div class="gh-token-modal" id="ghTokenModal">
+  <div class="gh-token-box" role="dialog" aria-modal="true" aria-labelledby="ghTokenTitle">
+    <div class="gh-token-title" id="ghTokenTitle">🔐 Configuration GitHub</div>
+    <div class="gh-token-sub">Entrez votre token GitHub avec <b>Contents → Read and write</b> sur le dépôt CM.</div>
+    <div class="gh-token-note">Le token sera conservé uniquement dans ce navigateur.</div>
+    <input class="gh-token-input" id="ghTokenInp" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_… ou github_pat_…"/>
+    <div class="gh-token-err" id="ghTokenErr"></div>
+    <div class="gh-token-actions">
+      <button class="gh-token-cancel" id="ghTokenCancel" type="button">Annuler</button>
+      <button class="gh-token-ok" id="ghTokenOk" type="button">OK</button>
+    </div>
+  </div>
+</div>
+
 <!-- FILE LOADING OVERLAY -->
 <div class="load-overlay" id="loadOverlay" aria-live="polite">
   <div class="load-box">
@@ -578,7 +628,7 @@
 <header class="hdr">
   <!-- GAUCHE : hamburger + logo + titre -->
   <div style="display:flex;align-items:center;gap:14px;flex-shrink:0">
-    <button class="hamburger" id="sbToggle" title="Afficher les filtres">
+    <button class="hamburger" id="sbToggle" title="Afficher/Masquer les filtres">
       <span class="hbr-line"></span>
       <span class="hbr-line"></span>
       <span class="hbr-line"></span>
@@ -605,6 +655,8 @@
       <div class="admin-actions" id="adminActions">
         <button class="btn-export2" id="exportBtn" title="Télécharger les données">⬇ Download</button>
         <button class="btn-import" id="importBtn" title="Importer un fichier">📂 Upload</button>
+        <button class="btn-reset-data" id="resetDataBtn" title="Réinitialiser les données">🗑 Reset</button>
+        <button class="btn-unlock" id="unlockBtn" title="Déverrouiller l'import">🔄 Déverrouiller</button>
       </div>
     </div>
   </div>
@@ -1198,21 +1250,51 @@ document.getElementById('addDateBtn').addEventListener('click',()=>{
 document.getElementById('datePickerInp').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('addDateBtn').click();});
 document.getElementById('clearDatesBtn').addEventListener('click',()=>{ selDates.clear(); renderDateTags(); refresh(); });
 renderDateTags();
+document.getElementById('resetBtn').addEventListener('click',()=>{
+  weekSel.clear(); selDates.clear(); Object.values(F).forEach(s=>s.clear());
+  document.querySelectorAll('.chip,.wchip').forEach(b=>b.classList.remove('on'));
+  document.getElementById('villeFilter').value=''; document.getElementById('searchInp').value='';
+  renderDateTags(); refresh();
+});
+document.getElementById('exportBtn').addEventListener('click',()=>exportCSV(window.__filteredGPL||filterRecords()));
 
-// Réinitialiser uniquement les filtres (ne supprime aucune donnée).
-const resetBtn = document.getElementById('resetBtn');
-if(resetBtn) resetBtn.addEventListener('click',()=>{
-  weekSel.clear();
-  selDates.clear();
+/* ════════════ RESET DATA ════════════ */
+document.getElementById('resetDataBtn').addEventListener('click',()=>{
+  if(!confirm(`⚠️ Vider toutes les données ? Le dashboard sera vide jusqu'au prochain import.`)) return;
+
+  // Aucune sauvegarde distante : le reset agit uniquement sur les données en mémoire.
+
+  // Vider les données en mémoire
+  records.length = 0;
+  Object.keys(meta).forEach(k => delete meta[k]);
+
+  // Remettre meta vide
+  Object.assign(meta, {
+    sourceFile:'—', rowCount:0, dateMin:'', dateMax:'',
+    weeks:[], cities:[], canaux:[], segments:[],
+    statusPaiement:[], etatCod:[], statutColis:[]
+  });
+
+  // Réinitialiser les filtres
+  weekSel.clear(); selDates.clear();
   Object.values(F).forEach(s=>s.clear());
   document.querySelectorAll('.chip,.wchip').forEach(b=>b.classList.remove('on'));
   const vf=document.getElementById('villeFilter'); if(vf) vf.value='';
-  const si=document.getElementById('searchInp'); if(si) si.value='';
+  const si=document.getElementById('searchInp');   if(si) si.value='';
+
+  // Déverrouiller l'import
+  try{ 
+    const fi=document.getElementById('fileInp'); if(fi) fi.disabled=false;
+    const sb=document.getElementById('saveBadge'); if(sb) sb.style.display='none';
+    const ub=document.getElementById('unlockBtn'); if(ub) ub.style.display='inline-flex';
+  }catch(e){}
+
+  // Rafraîchir tout
+  populateFilters();
+  updateMeta();
   renderDateTags();
   refresh();
 });
-
-document.getElementById('exportBtn').addEventListener('click',()=>exportCSV(window.__filteredGPL||filterRecords()));
 
 /* ════════════ CSV EXPORT ════════════ */
 function exportCSV(data){
@@ -1291,9 +1373,9 @@ function exportCSV(data){
     overlay.classList.remove('show');
   }
 
-  // Au démarrage : filtres TOUJOURS masqués.
-  // L'ancien état localStorage est volontairement ignoré.
-  if(!isMobile()) { layout.classList.add('sb-hidden'); btn.title='Afficher les filtres'; }
+  // Restaurer état desktop depuis localStorage
+  const saved = localStorage.getItem('gpl_sb_hidden');
+  if(saved === '1' && !isMobile()) layout.classList.add('sb-hidden');
 
   btn.addEventListener('click', ()=>{
     if(isMobile()){
@@ -1303,7 +1385,7 @@ function exportCSV(data){
     } else {
       // Desktop : collapse grid
       const hidden = layout.classList.toggle('sb-hidden');
-      btn.title = hidden ? 'Afficher les filtres' : 'Masquer les filtres';
+      localStorage.setItem('gpl_sb_hidden', hidden ? '1' : '0');
     }
   });
 
@@ -1895,6 +1977,9 @@ function unlockImport(){
   showStatus('🔓 Import déverrouillé.');
 }
 
+document.getElementById('unlockBtn').addEventListener('click', unlockImport);
+
+
 /* ════════════ GITHUB — DATA SPLIT LARGE VOLUME ════════════
    - Supporte de très gros volumes (jusqu'à plusieurs centaines de milliers de lignes).
    - Découpe automatiquement les données en fichiers JSON de 30 000 lignes maximum pour accélérer le chargement.
@@ -1932,26 +2017,51 @@ async function ghJson(url, options={}){
   if(!r.ok){ const e=new Error(d.message||('HTTP '+r.status)); e.status=r.status; e.data=d; throw e; }
   return d;
 }
+let _ghTokenWaiters=[];
+let _ghTokenBusy=false;
+function openGitHubTokenModal(){
+  return new Promise(resolve=>{
+    _ghTokenWaiters.push(resolve);
+    const modal=document.getElementById('ghTokenModal');
+    const inp=document.getElementById('ghTokenInp');
+    const err=document.getElementById('ghTokenErr');
+    if(modal) modal.classList.add('show');
+    if(err) err.textContent='';
+    if(inp){ inp.value=''; setTimeout(()=>inp.focus(),50); }
+  });
+}
+function closeGitHubTokenModal(value){
+  const modal=document.getElementById('ghTokenModal');
+  if(modal) modal.classList.remove('show');
+  const waiters=_ghTokenWaiters.splice(0);
+  waiters.forEach(resolve=>resolve(value||null));
+}
 async function requestGitHubToken(){
   let token=getGitHubToken();
   if(token) return token;
-  token=prompt('🔐 Configuration GitHub\n\nEntrez votre token GitHub avec Contents → Read and write sur le dépôt CM.\n\nLe token sera conservé uniquement dans ce navigateur.');
-  if(!token) return null;
-  token=token.trim();
-  if(!/^(gh[pousr]_)/.test(token) && !token.startsWith('github_pat_')){
-    showStatus('❌ Format de token GitHub non reconnu.',true); return null;
-  }
-  showStatus('🔎 Vérification du token GitHub…');
+  if(_ghTokenBusy) return await openGitHubTokenModal();
+  _ghTokenBusy=true;
   try{
-    const me=await ghJson(GH_API_BASE+'/user',{headers:ghHeaders(token)});
-    setGitHubToken(token);
-    showStatus('✅ Token GitHub validé'+(me.login?' — '+me.login:'')+'.');
-    return token;
-  }catch(e){
-    if(e.status===401) showStatus('❌ HTTP 401 — token invalide, révoqué ou expiré.',true);
-    else showStatus('❌ Vérification GitHub impossible : '+e.message,true);
-    return null;
-  }
+    token=await openGitHubTokenModal();
+    if(!token) return null;
+    token=token.trim();
+    if(!/^(gh[pousr]_)/.test(token) && !token.startsWith('github_pat_')){
+      const err=document.getElementById('ghTokenErr');
+      if(err) err.textContent='❌ Format de token GitHub non reconnu.';
+      return null;
+    }
+    showStatus('🔎 Vérification du token GitHub…');
+    try{
+      const me=await ghJson(GH_API_BASE+'/user',{headers:ghHeaders(token)});
+      setGitHubToken(token);
+      showStatus('✅ Token GitHub validé'+(me.login?' — '+me.login:'')+'.');
+      return token;
+    }catch(e){
+      if(e.status===401) showStatus('❌ HTTP 401 — token invalide, révoqué ou expiré.',true);
+      else showStatus('❌ Vérification GitHub impossible : '+e.message,true);
+      return null;
+    }
+  }finally{ _ghTokenBusy=false; }
 }
 function makeParts(payload){
   const records=payload.records||[];
