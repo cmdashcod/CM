@@ -152,8 +152,6 @@
     .btn-export2:hover{box-shadow:0 6px 16px rgba(245,194,0,.4)}
     .btn-theme{width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--txt);cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
     .btn-theme:hover{border-color:var(--accent);background:var(--teal-s);transform:translateY(-1px) rotate(-8deg)}
-    .btn-reset-data{background:rgba(217,79,74,.85);color:#fff;border:1px solid rgba(217,79,74,.5) !important}
-    .btn-reset-data:hover{background:rgba(217,79,74,1);box-shadow:0 4px 12px rgba(217,79,74,.3)}
 
     /* ── ADMIN / OUTILS ── */
     .admin-toggle{
@@ -173,12 +171,8 @@
     .admin-actions{display:none;align-items:center;gap:6px}
     .admin-actions.show{display:flex}
     .admin-actions button{height:38px;padding:0 13px;border-radius:10px;border:none;cursor:pointer;font-size:12px;font-weight:700;font-family:'Cairo',sans-serif;white-space:nowrap}
-    .admin-actions .btn-unlock{background:rgba(0,137,150,.10);color:var(--accent);border:1px solid var(--accent) !important}
-    .admin-actions .btn-unlock:hover{background:var(--accent);color:#fff}
     .admin-actions .btn-import{background:var(--hdr-btn-import-bg);color:var(--hdr-btn-import-color);border:1px solid var(--hdr-btn-import-border) !important}
     .admin-actions .btn-export2{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#1c1400}
-    .admin-actions .btn-reset-data{background:rgba(217,79,74,.85);color:#fff;border:1px solid rgba(217,79,74,.5) !important}
-    .admin-actions .btn-reset-data:hover{background:rgba(217,79,74,1)}
 
     /* LAYOUT */
     .layout{display:grid;grid-template-columns:216px 1fr;min-height:calc(100vh - 54px);transition:grid-template-columns .25s var(--ease)}
@@ -638,8 +632,6 @@
       <div class="admin-actions" id="adminActions">
         <button class="btn-export2" id="exportBtn" title="Télécharger les données">⬇ Download</button>
         <button class="btn-import" id="importBtn" title="Importer un fichier">📂 Upload</button>
-        <button class="btn-reset-data" id="resetDataBtn" title="Réinitialiser les données">🗑 Reset</button>
-        <button class="btn-unlock" id="unlockBtn" title="Déverrouiller l'import">🔄 Déverrouiller</button>
       </div>
     </div>
   </div>
@@ -1242,43 +1234,6 @@ document.getElementById('resetBtn').addEventListener('click',()=>{
 document.getElementById('exportBtn').addEventListener('click',()=>exportCSV(window.__filteredGPL||filterRecords()));
 
 /* ════════════ RESET DATA ════════════ */
-document.getElementById('resetDataBtn').addEventListener('click',()=>{
-  if(!confirm(`⚠️ Vider toutes les données ? Le dashboard sera vide jusqu'au prochain import.`)) return;
-
-  // Aucune sauvegarde distante : le reset agit uniquement sur les données en mémoire.
-
-  // Vider les données en mémoire
-  records.length = 0;
-  Object.keys(meta).forEach(k => delete meta[k]);
-
-  // Remettre meta vide
-  Object.assign(meta, {
-    sourceFile:'—', rowCount:0, dateMin:'', dateMax:'',
-    weeks:[], cities:[], canaux:[], segments:[],
-    statusPaiement:[], etatCod:[], statutColis:[]
-  });
-
-  // Réinitialiser les filtres
-  weekSel.clear(); selDates.clear();
-  Object.values(F).forEach(s=>s.clear());
-  document.querySelectorAll('.chip,.wchip').forEach(b=>b.classList.remove('on'));
-  const vf=document.getElementById('villeFilter'); if(vf) vf.value='';
-  const si=document.getElementById('searchInp');   if(si) si.value='';
-
-  // Déverrouiller l'import
-  try{ 
-    const fi=document.getElementById('fileInp'); if(fi) fi.disabled=false;
-    const sb=document.getElementById('saveBadge'); if(sb) sb.style.display='none';
-    const ub=document.getElementById('unlockBtn'); if(ub) ub.style.display='inline-flex';
-  }catch(e){}
-
-  // Rafraîchir tout
-  populateFilters();
-  updateMeta();
-  renderDateTags();
-  refresh();
-});
-
 /* ════════════ CSV EXPORT ════════════ */
 function exportCSV(data){
   // Format compatible import CRBT : Numéro ; Lignes de facture/Référence ; Montant (= CRBT) en premier
@@ -1949,19 +1904,7 @@ function lockUpload(savedAt){
   if(badge){badge.style.display='inline-flex';badge.textContent='🔒 '+savedAt;}
 
   // Le bouton reste dans le panneau des outils, masqué tant que le panneau est fermé.
-  const ub=document.getElementById('unlockBtn');
-  if(ub) ub.style.display='inline-flex';
 }
-
-function unlockImport(){
-  if(fileInp) fileInp.disabled=false;
-  const badge=document.getElementById('saveBadge');
-  if(badge) badge.style.display='none';
-  showStatus('🔓 Import déverrouillé.');
-}
-
-document.getElementById('unlockBtn').addEventListener('click', unlockImport);
-
 
 /* ════════════ GITHUB — DATA SPLIT LARGE VOLUME ════════════
    - Supporte de très gros volumes (jusqu'à plusieurs centaines de milliers de lignes).
