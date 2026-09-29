@@ -211,7 +211,7 @@
     .up-status{display:none;font-size:10px;font-weight:600;color:rgba(255,255,255,.8);padding:7px;border-radius:7px;background:rgba(255,255,255,.09);line-height:1.4;word-break:break-word}
     .up-status.show{display:block}
     .up-status.err{background:rgba(217,79,74,.2);color:#ffb3ae}
-    .load-overlay{display:none !important;position:fixed;inset:0;z-index:99999;background:rgba(7,20,27,.72);backdrop-filter:blur(3px);align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
+    .load-overlay{position:fixed;inset:0;z-index:99999;background:rgba(7,20,27,.72);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
     .load-overlay.show{display:flex}
     .load-box{width:min(460px,94vw);background:#fff;border-radius:16px;padding:22px 22px 18px;box-shadow:0 20px 70px rgba(0,0,0,.3);font-family:Cairo,sans-serif}
     .load-title{font-size:16px;font-weight:900;color:#17323a;margin-bottom:6px}
@@ -578,7 +578,7 @@
 <header class="hdr">
   <!-- GAUCHE : hamburger + logo + titre -->
   <div style="display:flex;align-items:center;gap:14px;flex-shrink:0">
-    <button class="hamburger" id="sbToggle" title="Afficher/Masquer les filtres">
+    <button class="hamburger" id="sbToggle" title="Afficher les filtres">
       <span class="hbr-line"></span>
       <span class="hbr-line"></span>
       <span class="hbr-line"></span>
@@ -605,8 +605,6 @@
       <div class="admin-actions" id="adminActions">
         <button class="btn-export2" id="exportBtn" title="Télécharger les données">⬇ Download</button>
         <button class="btn-import" id="importBtn" title="Importer un fichier">📂 Upload</button>
-        <button class="btn-reset-data" id="resetDataBtn" title="Réinitialiser les données">🗑 Reset</button>
-        <button class="btn-unlock" id="unlockBtn" title="Déverrouiller l'import">🔄 Déverrouiller</button>
       </div>
     </div>
   </div>
@@ -1208,44 +1206,6 @@ document.getElementById('resetBtn').addEventListener('click',()=>{
 });
 document.getElementById('exportBtn').addEventListener('click',()=>exportCSV(window.__filteredGPL||filterRecords()));
 
-/* ════════════ RESET DATA ════════════ */
-document.getElementById('resetDataBtn').addEventListener('click',()=>{
-  if(!confirm(`⚠️ Vider toutes les données ? Le dashboard sera vide jusqu'au prochain import.`)) return;
-
-  // Aucune sauvegarde distante : le reset agit uniquement sur les données en mémoire.
-
-  // Vider les données en mémoire
-  records.length = 0;
-  Object.keys(meta).forEach(k => delete meta[k]);
-
-  // Remettre meta vide
-  Object.assign(meta, {
-    sourceFile:'—', rowCount:0, dateMin:'', dateMax:'',
-    weeks:[], cities:[], canaux:[], segments:[],
-    statusPaiement:[], etatCod:[], statutColis:[]
-  });
-
-  // Réinitialiser les filtres
-  weekSel.clear(); selDates.clear();
-  Object.values(F).forEach(s=>s.clear());
-  document.querySelectorAll('.chip,.wchip').forEach(b=>b.classList.remove('on'));
-  const vf=document.getElementById('villeFilter'); if(vf) vf.value='';
-  const si=document.getElementById('searchInp');   if(si) si.value='';
-
-  // Déverrouiller l'import
-  try{ 
-    const fi=document.getElementById('fileInp'); if(fi) fi.disabled=false;
-    const sb=document.getElementById('saveBadge'); if(sb) sb.style.display='none';
-    const ub=document.getElementById('unlockBtn'); if(ub) ub.style.display='inline-flex';
-  }catch(e){}
-
-  // Rafraîchir tout
-  populateFilters();
-  updateMeta();
-  renderDateTags();
-  refresh();
-});
-
 /* ════════════ CSV EXPORT ════════════ */
 function exportCSV(data){
   // Format compatible import CRBT : Numéro ; Lignes de facture/Référence ; Montant (= CRBT) en premier
@@ -1323,9 +1283,8 @@ function exportCSV(data){
     overlay.classList.remove('show');
   }
 
-  // Restaurer état desktop depuis localStorage
-  const saved = localStorage.getItem('gpl_sb_hidden');
-  if(saved === '1' && !isMobile()) layout.classList.add('sb-hidden');
+  // Au démarrage : filtres masqués. L'utilisateur les affiche avec le bouton hamburger.
+  if(!isMobile()) layout.classList.add('sb-hidden');
 
   btn.addEventListener('click', ()=>{
     if(isMobile()){
@@ -1335,7 +1294,7 @@ function exportCSV(data){
     } else {
       // Desktop : collapse grid
       const hidden = layout.classList.toggle('sb-hidden');
-      localStorage.setItem('gpl_sb_hidden', hidden ? '1' : '0');
+      btn.title = hidden ? 'Afficher les filtres' : 'Masquer les filtres';
     }
   });
 
@@ -1926,9 +1885,6 @@ function unlockImport(){
   if(badge) badge.style.display='none';
   showStatus('🔓 Import déverrouillé.');
 }
-
-document.getElementById('unlockBtn').addEventListener('click', unlockImport);
-
 
 /* ════════════ GITHUB — DATA SPLIT LARGE VOLUME ════════════
    - Supporte de très gros volumes (jusqu'à plusieurs centaines de milliers de lignes).
