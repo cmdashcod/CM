@@ -8,24 +8,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link rel="preconnect" href="https://cdn.jsdelivr.net"/>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js">
-/* GitHub token modal controls */
-(function(){
-  const inp=document.getElementById('ghTokenInp');
-  const ok=document.getElementById('ghTokenOk');
-  const cancel=document.getElementById('ghTokenCancel');
-  if(!inp||!ok||!cancel) return;
-  ok.addEventListener('click',()=>{
-    const v=inp.value.trim();
-    if(!v){ const e=document.getElementById('ghTokenErr'); if(e)e.textContent='Entrez votre token GitHub.'; inp.focus(); return; }
-    closeGitHubTokenModal(v);
-  });
-  cancel.addEventListener('click',()=>closeGitHubTokenModal(null));
-  inp.addEventListener('keydown',e=>{
-    if(e.key==='Enter') ok.click();
-    if(e.key==='Escape') cancel.click();
-  });
-})();
-
 </script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
@@ -536,6 +518,7 @@
 /* GitHub token modal: stays inside the page when switching browser tabs. */
 .gh-token-modal{position:fixed;inset:0;z-index:10050;display:none;align-items:center;justify-content:center;background:rgba(10,18,24,.68);backdrop-filter:blur(3px);padding:20px;box-sizing:border-box}
 .gh-token-modal.show{display:flex}
+.gh-token-modal.show{visibility:visible !important;opacity:1 !important;}
 .gh-token-box{width:min(450px,calc(100vw - 40px));background:var(--panel,#fff);color:var(--txt,#17313a);border:1px solid rgba(255,255,255,.18);border-radius:16px;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.35);box-sizing:border-box}
 .gh-token-title{font-size:17px;font-weight:900;margin-bottom:14px}
 .gh-token-sub{font-size:13px;line-height:1.55;margin-bottom:12px}
@@ -2019,23 +2002,40 @@ async function ghJson(url, options={}){
 }
 let _ghTokenWaiters=[];
 let _ghTokenBusy=false;
+let _ghTokenPending=false;
+
 function openGitHubTokenModal(){
   return new Promise(resolve=>{
     _ghTokenWaiters.push(resolve);
+    _ghTokenPending=true;
+    try{ sessionStorage.setItem('cm_gh_token_pending','1'); }catch(e){}
     const modal=document.getElementById('ghTokenModal');
     const inp=document.getElementById('ghTokenInp');
     const err=document.getElementById('ghTokenErr');
     if(modal) modal.classList.add('show');
     if(err) err.textContent='';
-    if(inp){ inp.value=''; setTimeout(()=>inp.focus(),50); }
+    // Do NOT clear the field if it already contains text.
+    if(inp){ setTimeout(()=>inp.focus(),80); }
   });
 }
+
 function closeGitHubTokenModal(value){
   const modal=document.getElementById('ghTokenModal');
   if(modal) modal.classList.remove('show');
+  _ghTokenPending=false;
+  try{ sessionStorage.removeItem('cm_gh_token_pending'); }catch(e){}
   const waiters=_ghTokenWaiters.splice(0);
   waiters.forEach(resolve=>resolve(value||null));
 }
+
+function restoreGitHubTokenModal(){
+  let pending=_ghTokenPending;
+  try{ pending=pending || sessionStorage.getItem('cm_gh_token_pending')==='1'; }catch(e){}
+  if(!pending) return;
+  const modal=document.getElementById('ghTokenModal');
+  if(modal && !modal.classList.contains('show')) modal.classList.add('show');
+}
+
 async function requestGitHubToken(){
   let token=getGitHubToken();
   if(token) return token;
@@ -2048,7 +2048,9 @@ async function requestGitHubToken(){
     if(!/^(gh[pousr]_)/.test(token) && !token.startsWith('github_pat_')){
       const err=document.getElementById('ghTokenErr');
       if(err) err.textContent='❌ Format de token GitHub non reconnu.';
-      return null;
+      // Keep the modal OPEN so the user can correct the token.
+      _ghTokenBusy=false;
+      return await requestGitHubToken();
     }
     showStatus('🔎 Vérification du token GitHub…');
     try{
@@ -2059,10 +2061,36 @@ async function requestGitHubToken(){
     }catch(e){
       if(e.status===401) showStatus('❌ HTTP 401 — token invalide, révoqué ou expiré.',true);
       else showStatus('❌ Vérification GitHub impossible : '+e.message,true);
-      return null;
+      // Reopen the modal after an invalid token so it does not disappear.
+      _ghTokenBusy=false;
+      return await requestGitHubToken();
     }
   }finally{ _ghTokenBusy=false; }
 }
+
+// Attach handlers only AFTER the HTML elements exist.
+document.addEventListener('DOMContentLoaded',()=>{
+  const inp=document.getElementById('ghTokenInp');
+  const ok=document.getElementById('ghTokenOk');
+  const cancel=document.getElementById('ghTokenCancel');
+  if(ok) ok.addEventListener('click',()=>{
+    const v=(inp?.value||'').trim();
+    if(!v){ const e=document.getElementById('ghTokenErr'); if(e)e.textContent='Entrez votre token GitHub.'; inp?.focus(); return; }
+    closeGitHubTokenModal(v);
+  });
+  if(cancel) cancel.addEventListener('click',()=>closeGitHubTokenModal(null));
+  if(inp) inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){ e.preventDefault(); ok?.click(); }
+    if(e.key==='Escape'){ e.preventDefault(); cancel?.click(); }
+  });
+  // Never close the token modal when the page loses focus or the user changes tabs.
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible') restoreGitHubTokenModal();
+  });
+  window.addEventListener('focus',restoreGitHubTokenModal);
+  restoreGitHubTokenModal();
+});
+
 function makeParts(payload){
   const records=payload.records||[];
   const parts=[];
