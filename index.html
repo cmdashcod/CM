@@ -211,8 +211,8 @@
     .up-status{display:none;font-size:10px;font-weight:600;color:rgba(255,255,255,.8);padding:7px;border-radius:7px;background:rgba(255,255,255,.09);line-height:1.4;word-break:break-word}
     .up-status.show{display:block}
     .up-status.err{background:rgba(217,79,74,.2);color:#ffb3ae}
-    .load-overlay{position:fixed;inset:0;z-index:99999;background:rgba(7,20,27,.72);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
-    .load-overlay.show{display:flex}
+    .load-overlay{display:none !important;position:fixed;inset:0;z-index:99999;background:rgba(7,20,27,.72);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
+    .load-overlay.show{display:none !important}
     .load-box{width:min(460px,94vw);background:#fff;border-radius:16px;padding:22px 22px 18px;box-shadow:0 20px 70px rgba(0,0,0,.3);font-family:Cairo,sans-serif}
     .load-title{font-size:16px;font-weight:900;color:#17323a;margin-bottom:6px}
     .load-text{font-size:12px;color:#60717a;line-height:1.5;min-height:36px}
@@ -1198,12 +1198,20 @@ document.getElementById('addDateBtn').addEventListener('click',()=>{
 document.getElementById('datePickerInp').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('addDateBtn').click();});
 document.getElementById('clearDatesBtn').addEventListener('click',()=>{ selDates.clear(); renderDateTags(); refresh(); });
 renderDateTags();
-document.getElementById('resetBtn').addEventListener('click',()=>{
-  weekSel.clear(); selDates.clear(); Object.values(F).forEach(s=>s.clear());
+
+// Réinitialiser uniquement les filtres (ne supprime aucune donnée).
+const resetBtn = document.getElementById('resetBtn');
+if(resetBtn) resetBtn.addEventListener('click',()=>{
+  weekSel.clear();
+  selDates.clear();
+  Object.values(F).forEach(s=>s.clear());
   document.querySelectorAll('.chip,.wchip').forEach(b=>b.classList.remove('on'));
-  document.getElementById('villeFilter').value=''; document.getElementById('searchInp').value='';
-  renderDateTags(); refresh();
+  const vf=document.getElementById('villeFilter'); if(vf) vf.value='';
+  const si=document.getElementById('searchInp'); if(si) si.value='';
+  renderDateTags();
+  refresh();
 });
+
 document.getElementById('exportBtn').addEventListener('click',()=>exportCSV(window.__filteredGPL||filterRecords()));
 
 /* ════════════ CSV EXPORT ════════════ */
@@ -1283,8 +1291,9 @@ function exportCSV(data){
     overlay.classList.remove('show');
   }
 
-  // Au démarrage : filtres masqués. L'utilisateur les affiche avec le bouton hamburger.
-  if(!isMobile()) layout.classList.add('sb-hidden');
+  // Au démarrage : filtres TOUJOURS masqués.
+  // L'ancien état localStorage est volontairement ignoré.
+  if(!isMobile()) { layout.classList.add('sb-hidden'); btn.title='Afficher les filtres'; }
 
   btn.addEventListener('click', ()=>{
     if(isMobile()){
